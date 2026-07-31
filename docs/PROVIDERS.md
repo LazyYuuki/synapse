@@ -2,6 +2,10 @@
 
 This document defines the first-class provider requirements for Synapse, with particular focus on direct OpenAI Codex sign-in, Tokamak's Codex pool, and ordinary OpenAI-compatible local or remote endpoints.
 
+Sections labeled **Implemented Provider** or **MVP** describe current code. Direct
+Codex, generic Tokamak, additional endpoint profiles, credential brokers, and
+health/discovery describe target architecture or explicitly deferred work.
+
 The design is based on the current Tokamak implementation in the sibling `menlo/tokamak` checkout. Tokamak source paths referenced below are relative to `menlo/tokamak` and describe the inspected implementation, not a promised external API version.
 
 ## Goals
@@ -148,7 +152,7 @@ The actual configuration format may be Elixir, JSON, or TOML. Secret fields alwa
 
 ## Shared Responses Codec
 
-The Responses codec constructs canonical OpenAI Responses requests and parses both JSON and SSE responses.
+`Synapse.Provider.ResponsesCodec` constructs canonical OpenAI Responses requests. The separate `Synapse.Provider.ResponsesStream` consumes framed SSE data and parses Responses JSON so request encoding and incremental response state remain independently testable.
 
 ### Canonical request
 
@@ -202,15 +206,18 @@ HTTP chunks do not correspond to SSE lines, events, JSON values, or tool argumen
 
 | Responses event | Synapse event |
 | --- | --- |
-| `response.created` | `message_start` |
-| `response.in_progress` | `message_update` |
-| `response.output_text.delta` | `text_delta` |
-| `response.output_text.done` | `text_end` |
-| `response.output_item.added` with `function_call` | `tool_call_start` |
-| `response.function_call_arguments.delta` | `tool_call_delta` |
-| `response.function_call_arguments.done` | `tool_call_end` |
-| `response.completed` | `message_end` |
-| `response.failed` | `error` |
+| `response.created` | `MessageStarted` |
+| `response.output_text.delta` | `TextDelta` |
+| `response.output_item.added` with `function_call` | `ToolCallStarted` |
+| `response.function_call_arguments.delta` | `ToolCallDelta` |
+| `response.function_call_arguments.done` | `ToolCallCompleted` |
+| `response.completed` | `MessageCompleted` plus successful terminal return |
+| `response.failed` | terminal `Provider.Error` return |
+
+Known lifecycle events that do not alter the MVP normalized contract, including
+`response.in_progress` and `response.output_text.done`, currently produce bounded
+unknown-event diagnostics. Adding semantic support belongs in `ResponsesStream`,
+not Tokamak transport.
 
 Tool arguments are accumulated by stable item ID and call ID, not merely by array position. A tool call becomes executable only after its arguments are complete and the response has not failed because of truncation or transport loss.
 
@@ -412,22 +419,41 @@ This is the preferred Tokamak integration for Codex-backed inference.
 
 ### Authentication
 
-Synapse can obtain the Tokamak API key through:
+The MVP resolves `TOKAMAK_API_KEY` from the process environment immediately before one HTTP request. `Synapse.Provider.Credentials` wraps the value with redacted default inspection and exposes it only through a callback used to construct the authorization header. The key is never added to a Provider Request, Event, Response, or Error.
+
+For local development, `.env.example` documents the required names. Synapse does not parse `.env` files or add a dotenv runtime dependency; a developer may load the ignored mode-`0600` `.env` into one shell with `set -a && source .env && set +a` before running a live command.
+
+The environment is an adapter, not the final credential store. A future local credential broker can obtain the Tokamak API key through:
 
 - Explicit entry in the Synapse TUI.
 - A local IPC credential command.
 - Import from `~/.tokamak/config.json` after user confirmation.
 - `TOKAMAK_API_KEY` for a controlled non-interactive deployment.
 
+Environment variables and immutable BEAM binaries cannot provide guaranteed memory wiping. Redacted inspection reduces accidental disclosure but cannot stop code inside the credential callback from retaining or logging the value. The HTTP transport must keep authorization headers out of diagnostics and normalized errors.
+
 The Tokamak CLI stores its configuration with file mode `0600`. Its current config behavior is implemented in `tokamak-cli/src/lib/tokamak-config.ts:155-257`.
 
-Synapse stores or references the value through its credential broker. It sends:
+The current environment adapter passes the value through the redacted credential
+handle to Tokamak transport. A future broker will replace that lookup without
+changing this header boundary:
 
 ```http
 Authorization: Bearer <tokamak-api-key>
 ```
 
 Tokamak also accepts `X-API-Key`, but Bearer authentication matches the public OpenAI-compatible route and CLI behavior.
+
+The credential-touching code path is intentionally small:
+
+1. `Synapse.Provider.Credentials.resolve/1,2` performs request-time lookup.
+2. `Synapse.Provider.Credentials.Secret` redacts ordinary inspection.
+3. `Synapse.Provider.Credentials.with_value/2` grants the request worker temporary access.
+4. `Synapse.Provider.Tokamak` constructs the authorization option inside that callback.
+5. Tokamak's sanitized status and request-ID helpers reject reflected credential values.
+
+Requests, ResponsesCodec, SSEDecoder, ResponsesStream, events, responses, Fake,
+Agent-facing contracts, and fixtures do not touch the credential.
 
 ### Request path
 
@@ -436,6 +462,47 @@ Synapse sends canonical Responses JSON directly to:
 ```text
 https://api.tokamak.sh/v1/agent-pool/codex-proxy/responses
 ```
+
+The live gateway currently returns streamed SSE bytes with `Content-Type: text/plain; charset=utf-8`. The Tokamak transport accepts this endpoint-specific compatibility label in addition to `text/event-stream`, while still requiring valid SSE framing and a terminal Responses event.
+
+The first live smoke test on July 30, 2026 confirmed the concrete ChatGPT Codex model ID `gpt-5.6-sol`. Tokamak rejected both the unrelated generic model `minimaxai/minimax-m2.7` and the `gpt-5.6` alias on this pooled route.
+
+### Live acceptance
+
+The opt-in acceptance suite is tagged `:live_tokamak` and excluded from ordinary
+`mix test` runs. It requires non-empty `TOKAMAK_API_KEY` and `SYNAPSE_MODEL`
+values at test runtime; selecting the tag without them skips each live test with
+a reason naming only the missing variable. Run it only from a trusted local
+checkout or explicitly protected environment, never for an untrusted pull
+request:
+
+```bash
+set -a && source .env && set +a
+mix test --only live_tokamak test/live_tokamak_test.exs
+```
+
+On July 30, 2026, all three checks passed against `gpt-5.6-sol`:
+
+- Text produced `MessageStarted`, non-empty `TextDelta`, one
+  `MessageCompleted`, and a completed normalized Response.
+- A strict synthetic `synapse_acceptance_probe` schema produced one call start,
+  non-empty argument deltas, and exactly one completed FunctionCall with
+  `%{"value" => "SYNAPSE_TOOL_OK"}`. The test did not execute the function.
+- A long text request was cancelled after its first non-empty delta. It returned
+  one non-retryable interruption with `output_started: true`, one message start,
+  and no completion or replay.
+
+A controlled Req-adapter fixture supplies a recognizable invalid synthetic key
+and HTTP 401 response for the authentication failure check. This verifies the
+classification and disclosure boundary without sending deliberately invalid
+credentials over the network or depending on CI secrets.
+
+No live body, response ID, call ID, account field, prompt transcript, or header
+is persisted. Existing readable fixtures use synthetic IDs and content while
+reproducing the observed created, text delta, function argument delta/done,
+completed, and optional `[DONE]` shapes. Live output is asserted in memory and
+discarded; adding or updating a fixture requires a manual secret and identity
+review before commit.
 
 Tokamak then:
 
@@ -575,32 +642,32 @@ An external prompt cannot request a different secret reference, base URL, or pro
 
 ## Timeout And Activity Policy
 
-Each provider worker tracks:
+The implemented Tokamak worker tracks:
 
 - Connection deadline.
-- Response-header or first-byte deadline.
 - Inactivity deadline between meaningful events.
 - Whole-turn deadline.
 - Cancellation reference.
 - Whether any model output has been emitted.
-- Number and reason of retry attempts.
 
 A two-minute provider inactivity deadline is a reasonable initial default, configurable by endpoint profile. Heartbeats and SSE comments can prove transport liveness, but policy may require meaningful model events rather than accepting empty network traffic forever.
 
 ## Retry Classification
 
-| Failure | Action |
+| Failure | Provider classification and higher-layer policy |
 | --- | --- |
-| DNS, connect, or TLS failure before response | Bounded retry with backoff. |
-| HTTP 408, 429, or retryable 5xx before output | Profile-controlled bounded retry. |
-| Direct Codex 401 before output | Force refresh and retry once. |
+| DNS, connect, or TLS failure before response | Mark retryable before output; future Agent/Runtime may retry with backoff. |
+| HTTP 408, 429, or retryable 5xx before output | Mark retryable; future profile policy decides whether to retry. |
+| Direct Codex 401 before output | Deferred direct-Codex policy may refresh and retry once. |
 | Tokamak 401 or 403 | Surface Tokamak authentication or authorization failure. |
 | Tokamak pool unavailable | Surface pool failure; do not attempt local OpenAI refresh. |
 | Partial SSE followed by disconnect | Mark interrupted; do not continue the partial response. |
-| Malformed or incomplete tool arguments | Emit a failed tool-call result; never execute. |
-| Explicit cancellation | Cancel the underlying HTTP operation and emit a terminal interruption event. |
+| Malformed or incomplete tool arguments | Return protocol failure; never emit an executable call. |
+| Explicit cancellation | Cancel the underlying HTTP operation and return terminal interruption. |
 
-Provider-request retries occur only before output and remain inside one attempt budget. If the attempt becomes uncertain or exhausts its provider retry policy, the autonomous work-item policy may start a fresh attempt from the last accepted commit. It does not resume a half-streamed model thought.
+The implemented Provider performs exactly one HTTP attempt and only classifies
+retryability. A future Agent or Runtime policy may start a fresh attempt before
+output; it never resumes or transparently replays a half-streamed model thought.
 
 Switching from direct Codex to Tokamak, or from one model to another, is an explicit fallback policy. The change is recorded in the attempt and can occur only before output or in a fresh turn or attempt.
 
@@ -614,6 +681,160 @@ Switching from direct Codex to Tokamak, or from one model to another, is an expl
 - Reject provider redirects to unapproved origins when authorization is attached.
 - Strip unrelated environment variables from credential-bootstrap subprocesses.
 - Record sanitized provider status, request ID, model, usage, and latency.
+
+## Implemented Provider Hardening
+
+The MVP Tokamak Provider has one terminal return value: `{:ok, Response.t()}` or
+`{:error, Error.t()}`. Error kind, retryability, and `output_started` are
+independent axes: interruption or cancellation can occur before output, while
+any class after observable output must prevent transparent replay. Cancellation
+is initiated by the operation coordinator. A future Runtime will own those
+coordinators without changing the Provider contract.
+
+### Error taxonomy
+
+| Kind | Meaning | Normally retryable |
+| --- | --- | --- |
+| `configuration` | Missing or invalid trusted local configuration. | No |
+| `authentication` | Credential was absent or rejected. | No |
+| `authorization` | Credential is valid but lacks permission. | No |
+| `rate_limited` | Upstream returned HTTP 429 before output. | Yes |
+| `unavailable` | Upstream returned a retryable 5xx before output. | Yes |
+| `timeout` | Inactivity or absolute deadline elapsed. | Only before output |
+| `transport` | DNS, TLS, connect, adapter, or connection failure. | Only before output |
+| `protocol` | Invalid HTTP/SSE/Responses shape, limit, or event-sink contract. | No |
+| `interrupted` | EOF, cancellation, or termination before terminal completion. | No |
+| `upstream` | A valid `response.failed` terminal arrived. | No |
+
+HTTP status, request ID, exception class, and upstream error code are retained
+only where bounded and non-secret. Raw bodies, Req values, headers, exception
+messages, decoded payload maps, and credentials do not enter `Error`.
+
+### Resource limits
+
+| Resource | Default | Hard configurable ceiling | Protects |
+| --- | ---: | ---: | --- |
+| Encoded request body | 8 MiB | Not configurable | Request memory and upstream reader |
+| Retained HTTP error body | 4 KiB | Not configurable | Error-response memory; content is never exposed |
+| One transport chunk | 2 MiB | 8 MiB | Pre-split parser allocation |
+| One SSE line | 64 KiB | 1 MiB | Incomplete-line memory |
+| One SSE event | 1 MiB | 8 MiB | Frame fields and JSON decode memory |
+| Total model output | 64,000 bytes | 8 MiB | Text and argument fragment accumulation |
+| Function arguments | 64,000 bytes | 1 MiB | Tool JSON accumulation and decode |
+| Output items | 128 | 1,024 | Item, call, and ordering maps |
+| Content parts per message | 32 | 256 | Content-index maps |
+| Responses events | 10,000 | 100,000 | Empty-delta and fragment lists |
+| Compatibility diagnostics | 32 | 256 | Unknown-event output |
+| Identifier | 512 bytes | Not configurable | Stored IDs, model names, and call names |
+| Error diagnostic object | 4 KiB, 32 entries, depth 4 | Not configurable | Cross-component error data |
+| Inactivity timeout | 120 seconds | 900 seconds | Hung or comment-only streams |
+
+An absolute deadline is supplied by the operation caller as a monotonic
+timestamp; future Runtime operations will normally own it. Req retries and
+redirects remain disabled, so the Provider performs one bounded attempt.
+Configured parser and reducer limits reject non-positive values and values above
+their hard ceilings rather than accepting huge BEAM integers as configuration.
+
+### Cancellation ownership
+
+```mermaid
+sequenceDiagram
+  participant R as Operation coordinator
+  participant W as Request worker
+  participant G as Coordinator watchdog
+  participant H as Req/Finch request
+  R->>W: spawn and monitor
+  W->>G: link and monitor coordinator
+  W->>H: start one streaming request
+  alt explicit cancel
+    R->>W: exit(:kill)
+    W-xH: worker death closes request
+    R-->>R: stream returns one interrupted Provider.Error
+  else inactivity or absolute deadline
+    R->>W: exit(:kill)
+    W-xH: worker death closes request
+    R-->>R: stream returns one timeout Provider.Error
+  else coordinator crashes
+    G->>W: exit(:kill)
+    W-xH: worker death closes request
+  else HTTP failure before output
+    H--xW: transport/status failure
+    W->>R: one classified Provider.Error
+  else parser or sink failure
+    W-xH: halt owned request
+    W->>R: one protocol Provider.Error
+  else disconnect or incomplete EOF
+    H--xW: incomplete stream
+    W->>R: one interruption with actual output_started flag
+  else successful terminal response
+    W->>G: request_finished
+    W->>R: one completed Provider.Response
+  end
+```
+
+Each SSE frame is reduced and its normalized events are synchronously accepted
+before the next frame is interpreted. Decoder, reducer, or event-sink failure
+halts Req's stream callback. Events after a terminal Responses event are not
+interpreted or emitted, `[DONE]` is optional after `response.completed`, and an
+incomplete or malformed function call can never appear in a successful terminal
+response.
+
+### Compatibility policy
+
+Unknown event types can be ignored because they do not alter a known lifecycle;
+the reducer emits only their bounded type name as a diagnostic. Malformed known
+events fail because ignoring one could corrupt text order, call identity, or tool
+arguments. Multiple output items are retained by explicit output index and
+returned in source order.
+
+Tokamak endpoint and content-type compatibility rewrites remain isolated in
+`Synapse.Provider.Tokamak`; canonical request shaping remains in
+`Synapse.Provider.ResponsesCodec`. Test fixtures are synthetic, secret-free
+adaptations of documented Responses event shapes plus event names observed in a
+live Tokamak compatibility check on July 30, 2026. They contain no captured
+headers, bodies, request IDs, account data, or endpoint tokens.
+
+Tokamak's Codex proxy is a private compatibility boundary. Its event set,
+content type, accepted model names, authentication behavior, and undocumented
+rewrites can change independently of the public Responses API. A successful
+fixture suite therefore does not replace opt-in live acceptance.
+
+### Implementation tradeoffs
+
+| Choice | Benefit | Cost or limitation |
+| --- | --- | --- |
+| Synchronous event sink | Natural end-to-end backpressure and deterministic order | A slow sink delays network consumption |
+| Full conversation projection | No dependence on pooled account response state | Repeats request tokens and eventually needs higher-layer compaction |
+| Fixed production endpoint | Prevents model-driven origin changes and credential forwarding | Custom deployments and provider profiles are deferred |
+| Exactly one HTTP attempt | Cannot duplicate partial model output invisibly | Retry execution belongs to future Agent/Runtime policy |
+| Kill-owned-worker cancellation | Reliably closes the owned Finch request | No cooperative worker cleanup callback; terminal races are resolved by the coordinator |
+| Environment credential adapter | Minimal request-time boundary for the MVP | No capability broker, keychain, revocation, or guaranteed memory wiping |
+| Bounded unknown-event diagnostics | Tolerates additive protocol events safely | Semantically important new events may be omitted until explicitly modeled |
+| Opaque immutable decoder/reducer state | Pure deterministic tests without state-layout promises | External callers must use constructors and transition functions |
+| `:global` Fake registration | Cross-process scripts need no extra dependency | Operation IDs must be unique; a future test registry may replace it |
+
+Current normalized output supports assistant text and function calls over
+streaming Responses SSE. Rich reasoning/image/refusal content, hosted tools,
+structured output, non-streaming success bodies, health/discovery, telemetry,
+and SSE retry-hint policy are deferred. The decoder parses bounded SSE `retry`
+fields for protocol completeness, but Tokamak deliberately ignores them.
+
+### Security limitations
+
+The credential is resolved only inside the request worker and is excluded from
+Provider structs and normalized errors. A synthetic key reflected through an
+HTTP body, request-ID header, or adapter exception is discarded; only status,
+bounded safe request IDs, and exception class can cross the boundary.
+
+This is containment, not perfect redaction. The Provider cannot guarantee that a
+model will not repeat a secret already present in model input, that a tool result
+does not contain sensitive data, that an event sink or downstream component will
+not log normalized text, or that a transformed/encoded credential can be found
+by exact-value filtering. VM crash dumps, third-party library diagnostics, host
+process inspection, and a compromised BEAM node are outside this boundary. Do
+not put credentials in prompts, tool arguments, fixtures, telemetry metadata, or
+operation IDs; disable or protect VM crash dumps in credential-bearing runtime
+environments.
 
 ## Health And Discovery
 

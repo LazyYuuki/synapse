@@ -1,1 +1,25 @@
+# Local agent configuration may contain machine-specific settings.
 opencode.json
+
+# Local credentials and runtime configuration.
+.env
+.env.*
+!.env.example
+
+# Mix compilation and dependency artifacts.
+/_build/
+/deps/
+/cover/
+/doc/
+/tmp/
+
+# Local language-server state.
+/.elixir_ls/
+
+# Runtime and package artifacts.
+erl_crash.dump
+*.ez
+synapse-*.tar
+
+# macOS metadata.
+.DS_Store

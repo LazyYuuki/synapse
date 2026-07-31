@@ -1,0 +1,67 @@
+[
+  %{
+    "type" => "response.created",
+    "response" => %{
+      "id" => "response-text",
+      "model" => "configured-model",
+      "status" => "in_progress",
+      "output" => []
+    }
+  },
+  %{
+    "type" => "response.output_item.added",
+    "output_index" => 0,
+    "item" => %{
+      "id" => "message-text",
+      "type" => "message",
+      "status" => "in_progress",
+      "role" => "assistant",
+      "content" => []
+    }
+  },
+  %{
+    "type" => "response.output_text.delta",
+    "item_id" => "message-text",
+    "output_index" => 0,
+    "content_index" => 0,
+    "delta" => "Hello"
+  },
+  %{
+    "type" => "response.output_text.delta",
+    "item_id" => "message-text",
+    "output_index" => 0,
+    "content_index" => 0,
+    "delta" => " from"
+  },
+  %{
+    "type" => "response.output_text.delta",
+    "item_id" => "message-text",
+    "output_index" => 0,
+    "content_index" => 0,
+    "delta" => " Synapse"
+  },
+  %{
+    "type" => "response.completed",
+    "response" => %{
+      "id" => "response-text",
+      "model" => "configured-model",
+      "status" => "completed",
+      "output" => [
+        %{
+          "id" => "message-text",
+          "type" => "message",
+          "status" => "completed",
+          "role" => "assistant",
+          "content" => [%{"type" => "output_text", "text" => "Hello from Synapse"}]
+        }
+      ],
+      "usage" => %{
+        "input_tokens" => 12,
+        "output_tokens" => 3,
+        "total_tokens" => 15,
+        "raw" => "omit"
+      }
+    }
+  },
+  "[DONE]"
+]

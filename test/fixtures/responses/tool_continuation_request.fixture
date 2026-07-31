@@ -1,0 +1,37 @@
+%{
+  "model" => "configured-model",
+  "input" => [
+    %{
+      "type" => "message",
+      "role" => "user",
+      "content" => [%{"type" => "input_text", "text" => "Inspect and test the project"}]
+    },
+    %{
+      "type" => "function_call",
+      "id" => "item-read",
+      "call_id" => "call-read",
+      "name" => "read",
+      "arguments" => "{\"path\":\"mix.exs\"}"
+    },
+    %{
+      "type" => "function_call_output",
+      "call_id" => "call-read",
+      "output" => "1: defmodule Synapse.MixProject do"
+    },
+    %{
+      "type" => "function_call",
+      "id" => "item-test",
+      "call_id" => "call-test",
+      "name" => "bash",
+      "arguments" => "{\"command\":\"mix test\"}"
+    },
+    %{
+      "type" => "function_call_output",
+      "call_id" => "call-test",
+      "output" => "26 passed"
+    }
+  ],
+  "tools" => [],
+  "stream" => true,
+  "store" => false
+}

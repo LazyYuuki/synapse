@@ -1,0 +1,22 @@
+[
+  %{
+    "type" => "response.created",
+    "response" => %{
+      "id" => "response-failed",
+      "model" => "configured-model",
+      "status" => "in_progress"
+    }
+  },
+  %{
+    "type" => "response.failed",
+    "response" => %{
+      "id" => "response-failed",
+      "model" => "configured-model",
+      "status" => "failed",
+      "error" => %{
+        "code" => "server_error",
+        "message" => "raw upstream text must not escape"
+      }
+    }
+  }
+]

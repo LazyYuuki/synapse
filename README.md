@@ -8,7 +8,17 @@ The goal is not an agent that never fails. The goal is an agent where failure is
 
 ## Status
 
-Synapse is currently in the architecture and prototyping stage. This document describes the intended system and the constraints that should guide its implementation.
+Synapse is currently in the architecture and prototyping stage. Provider streaming
+and Workspace Phases 0-10 are implemented, including canonical APFS paths, bounded
+revisioned reads, atomic writes and exact edits, plus bounded project commands
+with isolated runtime directories, a minimal environment, streaming output,
+mutation permits, matching cancellation, independent inactivity and absolute
+deadlines, direct-child cleanup, and a deterministic scripted Fake backend for
+side-effect-free Tool tests. Model-facing tools remain planned in
+[`docs/plan/PLAN-TOOL-SYSTEM.md`](docs/plan/PLAN-TOOL-SYSTEM.md). This document
+describes both current behavior and intended constraints.
+
+The step-by-step plan for the first functional model-tool-loop MVP is [`docs/plan/PLAN.md`](docs/plan/PLAN.md).
 
 ## Design Decisions
 
@@ -261,23 +271,21 @@ Tokamak currently imports and refreshes Codex credentials but does not implement
 
 The detailed implementation plan, current Tokamak contracts, wire event mapping, credential handling, and known compatibility risks are documented in [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
 
-A provider normalizes vendor-specific responses into events such as:
+A provider normalizes vendor-specific responses into the implemented event union:
 
 ```text
-message_start
-text_start
-text_delta
-text_end
-tool_call_start
-tool_call_delta
-tool_call_end
-message_end
-error
+MessageStarted
+TextDelta
+ToolCallStarted
+ToolCallDelta
+ToolCallCompleted
+MessageCompleted
+Diagnostic
 ```
 
-HTTP streaming runs in a supervised worker. Server-sent event data must be buffered across HTTP chunk boundaries before JSON decoding. Cancellation must cancel the underlying request, not only stop displaying its output.
+The current transport runs each HTTP request in a monitored temporary worker with a coordinator watchdog; future Runtime supervision will own operation processes above it. Server-sent event data is buffered across HTTP chunk boundaries before JSON decoding. Cancellation terminates the worker that owns the underlying request, not only display output.
 
-Provider failures should normally become structured terminal events rather than escaping as unhandled exceptions.
+Provider failures become one structured terminal `Provider.Error`; progress events are non-terminal.
 
 ## Tools
 
@@ -297,24 +305,31 @@ A minimal tool behavior may resemble:
 ```elixir
 @callback specification() :: Synapse.Tool.Spec.t()
 
-@callback execute(map(), Synapse.Tool.Context.t()) ::
-  {:ok, Synapse.Tool.Result.t()}
-  | {:error, Synapse.Tool.Error.t()}
-  | {:ambiguous, Synapse.Tool.AmbiguousResult.t()}
+@callback execute(Synapse.Tool.Call.t(), Synapse.Tool.Context.t()) ::
+  Synapse.Tool.Result.t()
 ```
+
+The paired Result carries `status: :ok | :error | :ambiguous`; expected failure
+and uncertainty are data rather than exceptions or tuple-shape policy.
 
 The initial toolset should contain:
 
 - `read`
-- `bash`
-- `edit`
 - `write`
+- `edit`
+- `bash`
 
 `grep` and `glob` should follow shortly afterward.
 
 ### Execution semantics
 
-- Every tool call receives a corresponding result, including malformed, rejected, skipped, cancelled, and failed calls.
+The first MVP Executor handles one call synchronously and Agent will invoke calls
+in source order. Parallel scheduling and artifact spill describe the target
+architecture and remain deferred until the sequential boundary is complete.
+
+- Every valid tool call submitted to the Executor receives a corresponding paired
+  result, including unknown, invalid-argument, rejected, cancelled, failed, and
+  ambiguous calls.
 - Tool calls from a provider response truncated by its output limit are never executed because their arguments may be incomplete.
 - Side-effecting tools are not automatically replayed after a process crash.
 - Parallel-safe tools may execute concurrently.
@@ -326,9 +341,18 @@ The initial toolset should contain:
 
 ### Concurrent file mutation
 
+The current Workspace MVP uses one whole-workspace mutation lease per handle.
+Revision-checked whole-file create, replacement, and exact-one text edits are
+owned by its MutationServer and executed in one linked mutation worker. They use a
+synced same-directory stage, no-overwrite hard-link creation, atomic rename
+replacement, and bounded UTF-8 diff data. This deliberately conservative design
+precedes the per-path and multi-file coordinator described below.
+
+The target architecture expands that MVP as follows.
+
 Autonomous runs are isolated from one another with separate git worktrees. Multiple workers or subagents operating inside the same worktree must still coordinate through one `MutationCoordinator`; they may not write files directly and rely on timing.
 
-A read returns the canonical path, content, and an opaque revision derived from the content hash and relevant filesystem metadata. Every edit, write, delete, rename, or append request includes the revision it was based on. The mutation coordinator then:
+A read returns a normalized relative path, a bounded numbered line window, and an opaque revision derived from the complete content hash and relevant filesystem metadata. It never returns the canonical absolute root. Every edit, write, delete, rename, or append request includes the revision it was based on. The mutation coordinator then:
 
 1. Canonicalizes the path and checks the caller's capabilities.
 2. Acquires an exclusive, short-lived lease for that path.
@@ -347,7 +371,13 @@ Multi-file operations acquire leases in canonical path order to avoid deadlocks.
 
 Append is not a special concurrency escape hatch. An `append` tool must also provide an expected revision and pass through the mutation coordinator. Logs written by infrastructure should use a single-writer process or SQLite rather than having arbitrary agent processes append directly to the same file.
 
-All model-facing mutation tools must use this path. A shell command can bypass file-level coordination, so commands declared read-only must run without write capability where the operating system permits it. Any command that may mutate an unknown set of files acquires an exclusive workspace lease and is followed by a repository diff scan.
+All model-facing mutation tools must use this path. A shell command can bypass
+file-level coordination, so model-facing shell execution always declares an
+unknown mutation footprint and acquires the exclusive workspace lease. The MVP
+does not enforce OS-level read-only execution; that declaration is reserved for
+trusted fixed application commands. OS write denial and the repository diff scan
+after unknown commands are target hardening features and remain explicitly
+deferred until their implementation phases.
 
 ### Tool search
 
@@ -688,7 +718,7 @@ Each operation type defines an inactivity deadline and an absolute deadline. Act
 
 A provider stream or ordinary tool may begin with a two-to-three-minute inactivity deadline. Builds, test suites, downloads, migrations, and other legitimately quiet operations may declare a longer deadline. Deadlines are policy values attached to the operation specification rather than one global timeout.
 
-When an inactivity deadline expires, the supervisor requests cancellation, waits a bounded grace period, terminates the worker or process tree, and records the operation as timed out. If Synapse cannot determine whether a mutation completed, the result is ambiguous rather than simply failed.
+When an inactivity deadline expires, current Workspace ownership requests cancellation, waits a bounded grace period, and confirms its MuonTrap helper and owned direct operation are down. It does not claim complete process-tree termination: daemonized descendants may escape. If Synapse cannot determine whether a mutation completed, the result is ambiguous rather than simply failed.
 
 Every operation specification also defines a maximum retry count. No failed operation may loop indefinitely; five is the default upper bound, and side-effecting or permanently invalid operations use a lower bound or zero. Safe in-place retries and fresh-attempt retries are recorded separately so repeated infrastructure failures cannot hide an unproductive task.
 
@@ -724,6 +754,14 @@ Initial security rules are:
 - Put genuinely untrusted execution in a separate OS user, container, or VM.
 - Do not expose Erlang distribution to untrusted networks.
 
+Current Workspace safety is deliberately narrower than a sandbox. Path checks
+resist ordinary mistakes under a cooperative same-user threat model, not hostile
+TOCTOU swaps after validation. File replacement is atomically visible but does not
+claim parent-directory crash durability. Commands run as the same OS user with
+ambient filesystem and network authority. Healthy-VM cleanup proves the owned
+direct command; escaped descendants, daemonized processes, and uncatchable host or
+VM death remain explicit limitations.
+
 Project trust decides whether project-local code may be loaded. It is not a general tool permission system.
 
 ### Capability enforcement
@@ -756,9 +794,16 @@ Secret values must never enter prompts, transcripts, event payloads, command-lin
 
 A trusted tool or provider declares the secret references it requires. At execution time the credential broker verifies the run capability, tool identity, intended executable or HTTP audience, and operation ID. It then injects the value directly into an HTTP authorization header, subprocess environment, or stdin. The child receives a minimal environment and secrets are not inherited by unrelated descendants.
 
-For commands, the model receives and selects a pre-approved command template containing placeholders, never a command string containing the resolved value. The returned command description retains placeholders. Only bounded stdout, stderr, exit status, and structured results return to the model.
+For future credential-broker commands, the model should select a pre-approved command template containing placeholders, never a command string containing the resolved value. The returned command description retains placeholders.
 
-Because a subprocess can print a secret, all output still passes through exact-value redaction and provider-specific pattern filters before persistence or publication. Secret leases should be short-lived, audience-scoped, revocable, and cleared from process state as soon as practical. Secret access events record the symbolic name and audience, never the value.
+Current Workspace events and results contain raw bounded subprocess output. That
+untrusted data may contain secrets or absolute host paths and is not sanitized or
+redacted by Workspace; it must not be persisted, published, or rendered to a model
+without downstream Tool policy. A future credential broker should apply
+exact-value and provider-specific pattern filters as defense in depth. Secret
+leases should be short-lived, audience-scoped, revocable, and cleared from process
+state as soon as practical. Secret access events record the symbolic name and
+audience, never the value.
 
 Secret injection alone cannot guarantee that a value will never reach the model. An arbitrary executable can print, encode, transform, or transmit any secret it receives. Stronger isolation requires broker-owned HTTP requests or fixed, audited executables with constrained arguments, environment, filesystem, and network access. Generic shell tools must not receive secrets. Redaction is defense in depth, not a security boundary.
 
@@ -1038,6 +1083,7 @@ This positioning keeps the execution engine replaceable. MiniMax, Qwen, or a fut
 The likely minimal Elixir dependency set is:
 
 - `req` and Finch for streaming HTTP.
+- `muontrap` for contained, flow-controlled external process execution.
 - `exqlite`, or `ecto_sqlite3` if migrations and schemas justify Ecto.
 - `telemetry` for instrumentation.
 - `ex_doc` as a development dependency for generated API documentation and guides.
@@ -1045,7 +1091,6 @@ The likely minimal Elixir dependency set is:
 Possible later dependencies include:
 
 - `file_system` for immediate extension notifications.
-- `muontrap` for robust long-running external process management.
 - `term_ui` for a native full-screen prototype.
 - `phoenix_pubsub` only if multi-node operation becomes a real requirement.
 

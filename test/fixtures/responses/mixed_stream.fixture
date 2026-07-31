@@ -1,0 +1,56 @@
+[
+  %{
+    "type" => "response.created",
+    "response" => %{
+      "id" => "response-mixed",
+      "model" => "configured-model",
+      "status" => "in_progress"
+    }
+  },
+  %{
+    "type" => "response.output_item.added",
+    "output_index" => 1,
+    "item" => %{
+      "id" => "item-read",
+      "type" => "function_call",
+      "call_id" => "call-read",
+      "name" => "read",
+      "arguments" => ""
+    }
+  },
+  %{
+    "type" => "response.output_item.added",
+    "output_index" => 0,
+    "item" => %{
+      "id" => "message-mixed",
+      "type" => "message",
+      "role" => "assistant",
+      "content" => []
+    }
+  },
+  %{
+    "type" => "response.output_text.delta",
+    "item_id" => "message-mixed",
+    "content_index" => 0,
+    "delta" => "I will read it."
+  },
+  %{
+    "type" => "response.function_call_arguments.delta",
+    "item_id" => "item-read",
+    "delta" => "{}"
+  },
+  %{
+    "type" => "response.function_call_arguments.done",
+    "item_id" => "item-read",
+    "arguments" => "{}"
+  },
+  %{
+    "type" => "response.completed",
+    "response" => %{
+      "id" => "response-mixed",
+      "model" => "configured-model",
+      "status" => "completed",
+      "output" => []
+    }
+  }
+]

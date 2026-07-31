@@ -1,0 +1,77 @@
+[
+  %{
+    "type" => "response.created",
+    "response" => %{
+      "id" => "response-interleaved",
+      "model" => "configured-model",
+      "status" => "in_progress"
+    }
+  },
+  %{
+    "type" => "response.output_item.added",
+    "output_index" => 0,
+    "item" => %{
+      "id" => "item-read",
+      "type" => "function_call",
+      "call_id" => "call-read",
+      "name" => "read",
+      "arguments" => ""
+    }
+  },
+  %{
+    "type" => "response.output_item.added",
+    "output_index" => 1,
+    "item" => %{
+      "id" => "item-bash",
+      "type" => "function_call",
+      "call_id" => "call-bash",
+      "name" => "bash",
+      "arguments" => ""
+    }
+  },
+  %{
+    "type" => "response.function_call_arguments.delta",
+    "item_id" => "item-read",
+    "call_id" => "call-read",
+    "delta" => "{\"path\":"
+  },
+  %{
+    "type" => "response.function_call_arguments.delta",
+    "item_id" => "item-bash",
+    "call_id" => "call-bash",
+    "delta" => "{\"command\":"
+  },
+  %{
+    "type" => "response.function_call_arguments.delta",
+    "item_id" => "item-read",
+    "call_id" => "call-read",
+    "delta" => "\"mix.exs\"}"
+  },
+  %{
+    "type" => "response.function_call_arguments.delta",
+    "item_id" => "item-bash",
+    "call_id" => "call-bash",
+    "delta" => "\"mix test\"}"
+  },
+  %{
+    "type" => "response.function_call_arguments.done",
+    "item_id" => "item-bash",
+    "call_id" => "call-bash",
+    "arguments" => "{\"command\":\"mix test\"}"
+  },
+  %{
+    "type" => "response.function_call_arguments.done",
+    "item_id" => "item-read",
+    "call_id" => "call-read",
+    "arguments" => "{\"path\":\"mix.exs\"}"
+  },
+  %{
+    "type" => "response.completed",
+    "response" => %{
+      "id" => "response-interleaved",
+      "model" => "configured-model",
+      "status" => "completed",
+      "output" => []
+    }
+  }
+]

@@ -1,0 +1,72 @@
+%{
+  "model" => "configured-model",
+  "input" => [],
+  "tools" => [
+    %{
+      "type" => "function",
+      "name" => "read",
+      "description" => "Read numbered lines from a workspace file.",
+      "parameters" => %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{"type" => "string"},
+          "offset" => %{"type" => "integer", "minimum" => 0},
+          "limit" => %{"type" => "integer", "minimum" => 1}
+        },
+        "required" => ["path"],
+        "additionalProperties" => false
+      },
+      "strict" => true
+    },
+    %{
+      "type" => "function",
+      "name" => "write",
+      "description" => "Create or revision-check and replace a workspace file.",
+      "parameters" => %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{"type" => "string"},
+          "content" => %{"type" => "string"},
+          "expected_revision" => %{"type" => "string"}
+        },
+        "required" => ["path", "content", "expected_revision"],
+        "additionalProperties" => false
+      },
+      "strict" => true
+    },
+    %{
+      "type" => "function",
+      "name" => "edit",
+      "description" => "Replace one exact text occurrence in a workspace file.",
+      "parameters" => %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{"type" => "string"},
+          "old_text" => %{"type" => "string"},
+          "new_text" => %{"type" => "string"},
+          "expected_revision" => %{"type" => "string"}
+        },
+        "required" => ["path", "old_text", "new_text", "expected_revision"],
+        "additionalProperties" => false
+      },
+      "strict" => true
+    },
+    %{
+      "type" => "function",
+      "name" => "bash",
+      "description" => "Run a bounded command in the workspace.",
+      "parameters" => %{
+        "type" => "object",
+        "properties" => %{
+          "command" => %{"type" => "string"},
+          "timeout_ms" => %{"type" => "integer", "minimum" => 1}
+        },
+        "required" => ["command"],
+        "additionalProperties" => false
+      },
+      "strict" => true
+    }
+  ],
+  "stream" => true,
+  "store" => false
+}

@@ -1,0 +1,58 @@
+[
+  %{
+    "type" => "response.created",
+    "response" => %{
+      "id" => "response-tool",
+      "model" => "configured-model",
+      "status" => "in_progress"
+    }
+  },
+  %{
+    "type" => "response.output_item.added",
+    "output_index" => 0,
+    "item" => %{
+      "id" => "item-read",
+      "type" => "function_call",
+      "status" => "in_progress",
+      "call_id" => "call-read",
+      "name" => "read",
+      "arguments" => ""
+    }
+  },
+  %{
+    "type" => "response.function_call_arguments.delta",
+    "item_id" => "item-read",
+    "output_index" => 0,
+    "delta" => "{\"path\""
+  },
+  %{
+    "type" => "response.function_call_arguments.delta",
+    "item_id" => "item-read",
+    "output_index" => 0,
+    "delta" => ":\"mix.exs\"}"
+  },
+  %{
+    "type" => "response.function_call_arguments.done",
+    "item_id" => "item-read",
+    "output_index" => 0,
+    "arguments" => "{\"path\":\"mix.exs\"}"
+  },
+  %{
+    "type" => "response.completed",
+    "response" => %{
+      "id" => "response-tool",
+      "model" => "configured-model",
+      "status" => "completed",
+      "output" => [
+        %{
+          "id" => "item-read",
+          "type" => "function_call",
+          "status" => "completed",
+          "call_id" => "call-read",
+          "name" => "read",
+          "arguments" => "{\"path\":\"mix.exs\"}"
+        }
+      ]
+    }
+  }
+]

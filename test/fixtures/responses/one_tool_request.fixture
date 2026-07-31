@@ -1,0 +1,30 @@
+%{
+  "model" => "configured-model",
+  "input" => [
+    %{
+      "type" => "message",
+      "role" => "user",
+      "content" => [%{"type" => "input_text", "text" => "Read mix.exs"}]
+    }
+  ],
+  "tools" => [
+    %{
+      "type" => "function",
+      "name" => "read",
+      "description" => "Read numbered lines from a workspace file.",
+      "parameters" => %{
+        "type" => "object",
+        "properties" => %{
+          "path" => %{"type" => "string"},
+          "offset" => %{"type" => "integer", "minimum" => 0},
+          "limit" => %{"type" => "integer", "minimum" => 1}
+        },
+        "required" => ["path"],
+        "additionalProperties" => false
+      },
+      "strict" => true
+    }
+  ],
+  "stream" => true,
+  "store" => false
+}

@@ -1,0 +1,19 @@
+%{
+  "model" => "configured-model",
+  "instructions" => "You are a coding agent.",
+  "input" => [
+    %{
+      "type" => "message",
+      "role" => "user",
+      "content" => [%{"type" => "input_text", "text" => "Inspect the project"}]
+    },
+    %{
+      "type" => "message",
+      "role" => "assistant",
+      "content" => [%{"type" => "output_text", "text" => "I will inspect it."}]
+    }
+  ],
+  "tools" => [],
+  "stream" => true,
+  "store" => false
+}
