@@ -76,17 +76,17 @@ or safe to merge. Those are later workflow and Runtime responsibilities.
 
 | Phase | Deliverable | Status |
 | --- | --- | --- |
-| 0 | Confirm boundaries, identities, termination, and retry decisions | Not started |
-| 1 | Run, Budget, Agent Context, Result, Error, and State contracts | Not started |
-| 2 | Conversation projection and immutable turn requests | Not started |
-| 3 | Provider event adaptation and one text-only turn | Not started |
-| 4 | Complete function-call admission and batch preflight | Not started |
-| 5 | Sequential Tool execution and Run Events | Not started |
-| 6 | Tool-result continuation and multi-turn loop | Not started |
-| 7 | Budget, deadline, and output accounting | Not started |
-| 8 | Provider retry, interruption, and cancellation policy | Not started |
-| 9 | Deterministic integration and live Tokamak acceptance | Not started |
-| 10 | Reliability, security, and ExDoc comprehension review | Not started |
+| 0 | Confirm boundaries, identities, termination, and retry decisions | Complete |
+| 1 | Run, Budget, Agent Context, Result, Error, and State contracts | Complete |
+| 2 | Conversation projection and immutable turn requests | Complete |
+| 3 | Provider event adaptation and one text-only turn | Complete |
+| 4 | Complete function-call admission and batch preflight | Complete |
+| 5 | Sequential Tool execution and Run Events | Complete |
+| 6 | Tool-result continuation and multi-turn loop | Complete |
+| 7 | Budget, deadline, and output accounting | Complete |
+| 8 | Provider retry, interruption, and cancellation policy | Complete |
+| 9 | Deterministic integration and live Tokamak acceptance | Complete |
+| 10 | Reliability, security, and ExDoc comprehension review | Complete |
 
 Update this table only when a phase passes its completion gate.
 
@@ -275,7 +275,8 @@ target architecture in `README.md`.
 | `Synapse.Agent.Result` | Successful final text and bounded run accounting |
 | `Synapse.Agent.Error` | Sanitized structured failure, interruption, ambiguity, or budget terminal |
 | `Synapse.Agent.Runner` | Synchronous turn and Tool continuation loop |
-| Agent projection helper | Pure Provider input-item conversion and request assembly |
+| `Synapse.Agent.Projection` | Pure Provider input-item conversion and request assembly |
+| `Synapse.Agent.Admission` | Pure authoritative FunctionCall batch preflight and output accounting |
 | Agent operation-ID helper | Bounded distinct Provider-attempt and Tool-operation IDs |
 
 Do not create every proposed helper before its phase. Keep projection and budget
@@ -318,7 +319,7 @@ Initial hard Budget ceilings:
 | `max_wall_time_ms` | 1..3,600,000 | One hour maximum run lifetime |
 | `provider_inactivity_ms` | 1..900,000 | Matches Provider StreamContext ceiling |
 | `tool_inactivity_ms` | 1..900,000 | Matches Tool/Workspace process ceiling |
-| `max_output_bytes` | 1..8,388,608 | Fits below Provider's request hard ceiling before envelope overhead |
+| `max_output_bytes` | 1..4,194,304 | Leaves headroom below Provider's 8 MiB encoded request ceiling |
 | `max_provider_retries` | 0..5 | Allows retry disablement and prevents infrastructure loops |
 
 ### Run Request
@@ -371,9 +372,9 @@ identity, model, capability, and budget summaries.
 ```
 
 Context is trusted runtime dependency data. The model cannot provide or alter it.
-The exact implementation may wrap cancellation and retry timing in small structs
-instead of exposing many callbacks, but the following semantic seams are
-required:
+The MVP uses the exact fields shown above. Changing callback fields to wrapper
+structs or another lifetime abstraction requires updating this plan before Phase
+1. The required semantics are:
 
 - A concrete module exporting `stream/3` under the Provider behaviour.
 - One authenticated Workspace Handle already opened for the Run Request.
@@ -385,7 +386,10 @@ required:
 - An optional earlier Runtime absolute deadline.
 - Provider and Workspace activity sinks with their existing exact callback shapes.
 - Valid Tool Limits that fit the Workspace Handle ceilings.
-- A bounded retry-delay function or policy; deterministic tests can return zero.
+- A `retry_delay` function receiving the one-based retry ordinal and returning a
+  non-negative delay no greater than 10,000 ms. Production defaults are 250 ms
+  for the first retry and 1,000 ms for every later retry; deterministic tests can
+  return zero.
 
 Context inspection must not expose the Workspace Handle, callbacks, instructions,
 or cancellation reference.
@@ -461,6 +465,12 @@ HTTP status, retryability, and output-started state may be copied into allowlist
 details. Tool ambiguity records call ID, registered name, operation ID, and
 status, but not Tool content, arguments, command, path, or process output.
 
+Agent Error messages are limited to 512 UTF-8 bytes. Error details and Run Event
+metadata use string-keyed safe JSON bounded to 4,096 encoded bytes, 32 entries per
+collection, and depth 4. ToolCompleted metadata must also fit the caller's Tool
+Limits and cannot copy arbitrary Tool Result metadata without an Agent-owned
+allowlist.
+
 Initial stable reasons include:
 
 ```text
@@ -479,6 +489,7 @@ wall_time_budget_exhausted
 output_budget_exhausted
 run_cancelled
 event_sink_failed
+tool_executor_contract_failed
 ```
 
 ### Runner Boundary
@@ -731,15 +742,17 @@ Agent generates a distinct bounded ID for each Provider attempt and Tool
 execution. IDs are deterministic within one run and do not expose prompt, model,
 workspace path, Tool arguments, or Provider identifiers.
 
-One acceptable shape is:
+The MVP operation-ID shape is:
 
 ```text
-provider-<run-digest>-t0001-a0001
-tool-<run-digest>-t0001-c0001
+provider-<sha256-run-id>-t0001-a0001
+tool-<sha256-run-id>-t0001-c0001
 ```
 
-The digest is derived from trusted run identity only and exists to keep IDs
-bounded. Turn, attempt, and call ordinals provide uniqueness within the run.
+`sha256-run-id` is the lowercase 64-character hexadecimal SHA-256 digest of the
+validated Run ID bytes. Turn, attempt, and call ordinals are zero-padded to four
+digits. The configured hard ceilings keep each ordinal below 10,000, and the
+resulting IDs fit the stricter 256-byte Tool/Workspace ceiling without truncation.
 
 Required proofs:
 
@@ -751,745 +764,767 @@ Required proofs:
   arbitrary model name.
 - Tests can calculate expected IDs without randomness or wall time.
 
-The current Fake Provider indexes a whole multi-turn script by
-`StreamContext.operation_id`, while production semantics require a fresh ID for
-each Provider attempt. Before Agent integration relies on Fake, extend Fake's
-test-only script ownership so one script owner can be reached through a declared
-set of distinct operation IDs, or provide an equivalent provider-neutral test
-session seam. Do not reuse one production operation ID across turns merely to fit
-the Fake implementation.
+Fake Provider now accepts one operation ID for compatibility or up to 128 unique
+declared IDs of at most 512 bytes each. Small owner-linked aliases resolve those
+IDs to one ordered script. Agent tests can therefore preserve a fresh production
+operation ID per attempt without adding Fake configuration to Provider Request.
 
 ## Phase 0: Confirm Boundaries And Decisions
 
+### Evidence Record
+
+Phase 0 was confirmed on August 2, 2026 against the implemented Provider,
+Workspace, and Tool System Phases 0-10.
+
+| Decision | Confirmed evidence |
+| --- | --- |
+| Provider injection | `Synapse.Provider` remains a `stream/3` behaviour; no transport facade selects modules from model data |
+| Terminal authority | Provider Event docs and Tool integration tests require successful `Response.output_items` before execution |
+| Call admission | `Tool.Call.from_provider/2` validates complete bounded calls and deliberately drops Provider item ID |
+| One-call execution | `Tool.Executor.execute/2` is synchronous and owns no process, queue, event, retry, or multi-call order |
+| Tool schemas | Registry returns exact Read, Write, Edit, Bash Provider maps; codec fixtures and July 31 live acceptance prove compatibility |
+| Tool Result policy | Typed `status` is local authority, `content` is model-visible continuation, and safe `metadata` remains local |
+| Workspace lifecycle | Handle docs assign open/close to the trusted opening owner; Agent receives but never opens or closes it |
+| Retry ownership | Provider classifies retryability, Agent decides semantic replay, and Runtime later supervises attempt lifetime |
+| Fake attempt identity | Fake tests consume one ordered script through distinct declared operation IDs from another process |
+| Fake compatibility | Existing one-ID `start_link/2` and `with_script/3` callers remain valid; normalized Request is unchanged |
+| Context boundary | Exact trusted fields, callback shapes, instruction limit, deadline, Tool Limits, and retry-delay output ceiling are recorded above |
+| Identity boundary | Exact SHA-256 run digest and ordinal formats fit Provider and Tool/Workspace operation-ID ceilings |
+| Diagnostic safety | Error message, details, event metadata, inspection, and allowlist requirements are recorded before constructors exist |
+| Harness scope | Final model text means settled Agent output, never verification, acceptance, commit, or merge readiness |
+
 ### Contract Audit
 
-- [ ] Confirm `Synapse.Provider` remains a behaviour and Agent receives a trusted
+- [x] Confirm `Synapse.Provider` remains a behaviour and Agent receives a trusted
   concrete implementation module.
-- [ ] Confirm `Provider.Response.output_items` is the sole terminal authority.
-- [ ] Confirm `ToolCallCompleted` progress alone can never execute a Tool.
-- [ ] Confirm `Tool.Call.from_provider/2` is the call-admission boundary.
-- [ ] Confirm `Tool.Executor.execute/2` accepts one Call synchronously.
-- [ ] Confirm Registry specifications are Provider-ready maps in stable order.
-- [ ] Confirm Tool Result status, content, and metadata have distinct policy roles.
-- [ ] Confirm Runtime, not Agent, will open and close the Workspace Handle.
-- [ ] Confirm Runner imports no transport, host, Runtime, or terminal modules.
+- [x] Confirm `Provider.Response.output_items` is the sole terminal authority.
+- [x] Confirm `ToolCallCompleted` progress alone can never execute a Tool.
+- [x] Confirm `Tool.Call.from_provider/2` is the call-admission boundary.
+- [x] Confirm `Tool.Executor.execute/2` accepts one Call synchronously.
+- [x] Confirm Registry specifications are Provider-ready maps in stable order.
+- [x] Confirm Tool Result status, content, and metadata have distinct policy roles.
+- [x] Confirm Runtime, not Agent, will open and close the Workspace Handle.
+- [x] Confirm the Runner boundary forbids transport, host, Runtime, and terminal
+  module imports.
 
 ### Behavioral Decisions
 
-- [ ] Record exact final-text, mixed-output, and empty-response semantics.
-- [ ] Record whole-batch call preflight before side effects.
-- [ ] Record ordinary Tool error continuation and ambiguous Tool termination.
-- [ ] Record full-history in-memory projection and no compaction.
-- [ ] Record Agent as semantic Provider retry owner.
-- [ ] Record at most two safe retries across one run before output only.
-- [ ] Record run cancellation as out-of-band state, not parsed Tool JSON.
-- [ ] Record model completion as distinct from verification and acceptance.
-- [ ] Record durable event sequencing, persistence, and `RunSettled` as deferred.
+- [x] Record exact final-text, mixed-output, and empty-response semantics.
+- [x] Record whole-batch call preflight before side effects.
+- [x] Record ordinary Tool error continuation and ambiguous Tool termination.
+- [x] Record full-history in-memory projection and no compaction.
+- [x] Record Agent as semantic Provider retry owner.
+- [x] Record at most two safe retries across one run before output only.
+- [x] Record run cancellation as out-of-band state, not parsed Tool JSON.
+- [x] Record model completion as distinct from verification and acceptance.
+- [x] Record durable event sequencing, persistence, and `RunSettled` as deferred.
 
 ### Cross-Component Prerequisites
 
-- [ ] Resolve Fake Provider multi-turn script lookup with distinct operation IDs.
-- [ ] Add a deterministic Fake test proving one script is consumed through those
+- [x] Resolve Fake Provider multi-turn script lookup with distinct operation IDs.
+- [x] Add a deterministic Fake test proving one script is consumed through those
   distinct IDs in source order.
-- [ ] Preserve existing Fake APIs where there is a concrete current consumer, but
+- [x] Preserve existing Fake APIs where there is a concrete current consumer, but
   do not add generalized provider configuration to normalized Request.
-- [ ] Update Provider docs if Fake script ownership semantics change.
-- [ ] Confirm all four Tool schemas fit every immutable Provider Request.
+- [x] Update Provider docs if Fake script ownership semantics change.
+- [x] Confirm all four Tool schemas fit every immutable Provider Request.
 
 ### Limits And Security
 
-- [ ] Confirm Budget defaults and hard ceilings.
-- [ ] Confirm Run Request prompt, ID, path, and model ceilings.
-- [ ] Confirm Agent instructions, error details, event metadata, and operation-ID
+- [x] Confirm Budget defaults and hard ceilings.
+- [x] Confirm Run Request prompt, ID, path, and model ceilings.
+- [x] Confirm Agent instructions, error details, event metadata, and operation-ID
   ceilings.
-- [ ] Confirm ordinary inspection redacts prompt, cwd, instructions, Handles,
+- [x] Confirm ordinary inspection redacts prompt, cwd, instructions, Handles,
   callbacks, and normalized output content.
-- [ ] Confirm no Agent-generated metadata copies arbitrary Provider diagnostic or
+- [x] Confirm no Agent-generated metadata copies arbitrary Provider diagnostic or
   Tool content.
 
 ### Learning Gate
 
-- [ ] Explain why one synchronous Task is sufficient for the MVP Runner.
-- [ ] Explain why Provider events are progress while Response is authority.
-- [ ] Explain why all-call preflight must happen before the first side effect.
-- [ ] Explain why completion is not verification.
-- [ ] Trace each identity from Provider output through Tool execution without
+- [x] Explain why one synchronous Task is sufficient for the MVP Runner.
+- [x] Explain why Provider events are progress while Response is authority.
+- [x] Explain why all-call preflight must happen before the first side effect.
+- [x] Explain why completion is not verification.
+- [x] Trace each identity from Provider output through Tool execution without
   conflating item ID, call ID, operation ID, or run ID.
 
 ### Phase Complete When
 
-- [ ] Every decision that changes Agent state, execution, retry, or terminal
+- [x] Every decision that changes Agent state, execution, retry, or terminal
   behavior is recorded in this document.
-- [ ] The Fake Provider operation-ID prerequisite has a reviewed solution.
-- [ ] No unresolved decision requires changing the Agent boundary after Phase 1.
-- [ ] Parent architecture and completed component plans remain consistent.
+- [x] The Fake Provider operation-ID prerequisite has a reviewed solution.
+- [x] No unresolved decision requires changing the Agent boundary after Phase 1.
+- [x] Parent architecture and completed component plans remain consistent.
 
 ## Phase 1: Implement Shared Run And Agent Contracts
 
 ### Budget
 
-- [ ] Create `Synapse.Budget` with the seven MVP fields.
-- [ ] Validate positive integers and compiled hard ceilings.
-- [ ] Reject unknown fields and malformed keyword input.
-- [ ] Provide `default/0`, `new/1`, `valid?/1`, types, and field documentation.
-- [ ] Use checked arithmetic helpers for later accounting.
+- [x] Create `Synapse.Budget` with the seven MVP fields.
+- [x] Validate each recorded range, including zero only for Provider retries.
+- [x] Reject unknown fields and malformed keyword input.
+- [x] Provide `default/0`, `new/1`, `valid?/1`, types, and field documentation.
+- [x] Use checked signed 64-bit arithmetic for initial deadline accounting.
 
 ### Run Request
 
-- [ ] Create `Synapse.Run.Request` with exact required fields.
-- [ ] Validate bounded non-empty run ID, prompt, cwd, and model.
-- [ ] Validate fixed Tool CapabilitySet and Budget values.
-- [ ] Reject unknown fields, callbacks, modules, credentials, transport options,
+- [x] Create `Synapse.Run.Request` with exact required fields.
+- [x] Validate bounded non-empty run ID, prompt, cwd, and model.
+- [x] Validate fixed Tool CapabilitySet and Budget values.
+- [x] Reject unknown fields, callbacks, modules, credentials, transport options,
   and Workspace Handles.
-- [ ] Add safe ordinary inspection that redacts prompt and cwd.
+- [x] Add safe ordinary inspection that redacts prompt and cwd.
 
 ### Run Events
 
-- [ ] Create the closed Run Event union and event structs.
-- [ ] Define exact fields and types for every event.
-- [ ] Keep terminal Result/Error structs out of progress events until their own
+- [x] Create the closed Run Event union and event structs.
+- [x] Define exact fields and types for every event.
+- [x] Keep terminal Result/Error structs out of progress events until their own
   validation succeeds.
-- [ ] Validate safe bounded Tool event metadata.
-- [ ] Document synchronous ordering and sink-failure behavior.
+- [x] Validate safe bounded Tool event metadata.
+- [x] Document synchronous ordering and sink-failure behavior.
 
 ### Agent Contracts
 
-- [ ] Create `Synapse.Agent.Context` with trusted dependencies only.
-- [ ] Validate Provider module shape without calling it.
-- [ ] Validate Workspace Handle, Tool Limits, instructions, event/activity sinks,
+- [x] Create `Synapse.Agent.Context` with trusted dependencies only.
+- [x] Validate Provider module shape without calling it.
+- [x] Validate Workspace Handle, Tool Limits, instructions, event/activity sinks,
   cancellation controls, Runtime deadline, and retry-delay policy.
-- [ ] Create immutable `Synapse.Agent.State` and its initial constructor.
-- [ ] Compute the effective absolute deadline without sleeping or starting timers.
-- [ ] Create `Synapse.Agent.Result` and `Synapse.Agent.Error`.
-- [ ] Add safe ordinary inspection for content- or authority-bearing contracts.
-- [ ] Define the public `Synapse.Agent.Runner.run/2` specification without loop
+- [x] Create immutable `Synapse.Agent.State` and its initial constructor.
+- [x] Compute the effective absolute deadline without sleeping or starting timers.
+- [x] Create `Synapse.Agent.Result` and `Synapse.Agent.Error`.
+- [x] Add safe ordinary inspection for content- or authority-bearing contracts.
+- [x] Define the public `Synapse.Agent.Runner.run/2` specification without loop
   implementation yet.
 
 ### Tests
 
-- [ ] Construct defaults and lowered Budget values.
-- [ ] Reject negative, overflow, and above-ceiling Budget values; reject zero for
+- [x] Construct defaults and lowered Budget values.
+- [x] Reject negative, overflow, and above-ceiling Budget values; reject zero for
   every field except `max_provider_retries`.
-- [ ] Construct valid Run Request and reject every malformed field.
-- [ ] Verify Run Request inspection omits recognizable prompt and absolute path.
-- [ ] Construct each Run Event with valid safe fields.
-- [ ] Reject unsafe Tool event metadata.
-- [ ] Construct valid Agent Context with Fake Provider and Fake Workspace.
-- [ ] Reject arbitrary Provider modules, invalid Handles, malformed callbacks, and
+- [x] Construct valid Run Request and reject every malformed field.
+- [x] Verify Run Request inspection omits recognizable prompt and absolute path.
+- [x] Construct each Run Event with valid safe fields.
+- [x] Reject unsafe Tool event metadata.
+- [x] Construct valid Agent Context with Fake Provider and Fake Workspace.
+- [x] Reject arbitrary Provider modules, invalid Handles, malformed callbacks, and
   Tool Limits that exceed Workspace ceilings.
-- [ ] Construct initial State with one user input item and zero counters.
-- [ ] Construct every Agent Error kind and a successful Result.
-- [ ] Verify Agent contract inspection contains no synthetic secret or content.
+- [x] Construct initial State with one user input item and zero counters.
+- [x] Construct every Agent Error kind and a successful Result.
+- [x] Verify Agent contract inspection contains no synthetic secret or content.
 
 ### Documentation And Learning
 
-- [ ] Add `@moduledoc`, `@doc`, `@spec`, `@type`, and field ownership to every
+- [x] Add `@moduledoc`, `@doc`, `@spec`, `@type`, and field ownership to every
   public contract.
-- [ ] Explain trusted Run Request data versus trusted Agent Context authority.
-- [ ] Explain why State is immutable data rather than a GenServer.
-- [ ] Explain why Runtime deadline and Budget wall time are combined.
-- [ ] Add ExDoc examples for one Request, Context, Event, Result, and Error.
+- [x] Explain trusted Run Request data versus trusted Agent Context authority.
+- [x] Explain why State is immutable data rather than a GenServer.
+- [x] Explain why Runtime deadline and Budget wall time are combined.
+- [x] Add ExDoc examples for one Request, Context, Event, Result, and Error.
 
 ### Phase Complete When
 
-- [ ] Contracts compile with warnings as errors.
-- [ ] Every external constructor rejects unknown fields.
-- [ ] Inspection tests prove content and authority redaction.
-- [ ] No Provider call or Tool execution exists yet.
-- [ ] LSP hover explains who creates and consumes every field.
+- [x] Contracts compile with warnings as errors.
+- [x] Every external constructor rejects unknown fields.
+- [x] Inspection tests prove content and authority redaction.
+- [x] No Provider call or Tool execution exists yet.
+- [x] LSP hover explains who creates and consumes every field.
 
 ## Phase 2: Implement Conversation Projection And Turn Requests
 
 ### Initial Projection
 
-- [ ] Convert the user prompt into exactly one normalized Provider message.
-- [ ] Preserve prompt bytes exactly without trimming or interpolation.
-- [ ] Keep instructions in top-level Provider Request, not as a forged user item.
-- [ ] Use all four static Registry specifications in stable order.
-- [ ] Add only allowlisted local correlation metadata.
+- [x] Convert the user prompt into exactly one normalized Provider message.
+- [x] Preserve prompt bytes exactly without trimming or interpolation.
+- [x] Keep instructions in top-level Provider Request, not as a forged user item.
+- [x] Use all four static Registry specifications in stable order.
+- [x] Add only allowlisted local correlation metadata.
 
 ### Output Projection
 
-- [ ] Convert assistant Message output to normalized assistant input.
-- [ ] Convert FunctionCall output while retaining item ID, call ID, name, and
+- [x] Convert assistant Message output to normalized assistant input.
+- [x] Convert FunctionCall output while retaining item ID, call ID, name, and
   decoded string-keyed arguments.
-- [ ] Convert Tool Result to exact `function_call_output` using only call ID and
+- [x] Convert Tool Result to exact `function_call_output` using only call ID and
   Result content.
-- [ ] Insert each output immediately after its matching FunctionCall.
-- [ ] Preserve mixed Provider output-item source order.
-- [ ] Reject unsupported or malformed output items before conversation mutation.
+- [x] Insert each output immediately after its matching FunctionCall.
+- [x] Preserve mixed Provider output-item source order.
+- [x] Reject unsupported or malformed output items before conversation mutation.
 
 ### Immutable Turn Snapshot
 
-- [ ] Build `Provider.Request` from model, instructions, current input items, Tool
+- [x] Build `Provider.Request` from model, instructions, current input items, Tool
   specifications, and safe metadata.
-- [ ] Return a new value without mutating prior State.
-- [ ] Reuse the same Request value for safe retries.
-- [ ] Validate the completed Request through `Provider.Request.new/1`.
-- [ ] Keep credentials, endpoint policy, retry count, Workspace Handle, and event
+- [x] Return a new value without mutating prior State.
+- [x] Reuse the same Request value for safe retries.
+- [x] Validate the completed Request through `Provider.Request.new/1`.
+- [x] Keep credentials, endpoint policy, retry count, Workspace Handle, and event
   sink out of Provider Request.
 
 ### Tests
 
-- [ ] Exact first request fixture with one user message and four Tools.
-- [ ] Exact assistant Message projection.
-- [ ] Exact single FunctionCall and output projection.
-- [ ] Multiple calls with immediate paired outputs in source order.
-- [ ] Mixed text and calls.
-- [ ] Empty assistant text retained for continuation but not accepted as final.
-- [ ] Matching call IDs and retained Provider item IDs.
-- [ ] Result status and metadata absent from Provider input.
-- [ ] Prior State and Request remain unchanged after later projection.
-- [ ] Provider Request inspection contains no Handle, callbacks, or secret.
+- [x] Exact first request fixture with one user message and four Tools.
+- [x] Exact assistant Message projection.
+- [x] Exact single FunctionCall and output projection.
+- [x] Multiple calls with immediate paired outputs in source order.
+- [x] Mixed text and calls.
+- [x] Empty assistant text retained for continuation but not accepted as final.
+- [x] Matching call IDs and retained Provider item IDs.
+- [x] Result status and metadata absent from Provider input.
+- [x] Prior State and Request remain unchanged after later projection.
+- [x] Provider Request inspection contains no Handle, callbacks, or secret.
 
 ### Documentation And Learning
 
-- [ ] Explain full-history projection versus `previous_response_id`.
-- [ ] Explain why the repository is not dumped into initial context.
-- [ ] Explain why Result content, not metadata, is model-visible.
-- [ ] Add a diagram from first user item through one Tool continuation.
+- [x] Explain full-history projection versus `previous_response_id`.
+- [x] Explain why the repository is not dumped into initial context.
+- [x] Explain why Result content, not metadata, is model-visible.
+- [x] Add a diagram from first user item through one Tool continuation.
 
 ### Phase Complete When
 
-- [ ] Every supported conversation item round-trips through Provider Request and
+- [x] Every supported conversation item round-trips through Provider Request and
   ResponsesCodec tests.
-- [ ] Projection is pure, deterministic, and source-order preserving.
-- [ ] No Provider transport or Tool execution occurs in projection code.
-- [ ] Exact continuation data can be understood from ExDoc alone.
+- [x] Projection is pure, deterministic, and source-order preserving.
+- [x] No Provider transport or Tool execution occurs in projection code.
+- [x] Exact continuation data can be understood from ExDoc alone.
 
 ## Phase 3: Implement Provider Events And One Text Turn
 
 ### Runner Skeleton
 
-- [ ] Validate Request and Context before emitting RunStarted.
-- [ ] Initialize State and effective deadline.
-- [ ] Emit RunStarted and TurnStarted synchronously.
-- [ ] Build the first immutable Provider Request.
-- [ ] Generate a bounded Provider attempt operation ID.
-- [ ] Construct exact Provider StreamContext with inactivity, deadline,
+- [x] Validate Request and Context before emitting RunStarted.
+- [x] Initialize State and effective deadline.
+- [x] Emit RunStarted and TurnStarted synchronously.
+- [x] Build the first immutable Provider Request.
+- [x] Generate a bounded Provider attempt operation ID.
+- [x] Construct exact Provider StreamContext with inactivity, deadline,
   cancellation, and activity data.
-- [ ] Call the trusted Provider module through `stream/3`.
+- [x] Call the trusted Provider module through `stream/3`.
 
 ### Event Adaptation
 
-- [ ] Map Provider TextDelta to Run TextDelta without reconstruction.
-- [ ] Treat Provider MessageStarted as internal progress correlation.
-- [ ] Ignore ToolCall progress for execution and ToolStarted events.
-- [ ] Keep bounded Provider Diagnostic progress out of Agent metadata unless a
+- [x] Map Provider TextDelta to Run TextDelta without reconstruction.
+- [x] Treat Provider MessageStarted as internal progress correlation.
+- [x] Ignore ToolCall progress for execution and ToolStarted events.
+- [x] Keep bounded Provider Diagnostic progress out of Agent metadata unless a
   documented safe Run Event mapping is added.
-- [ ] Make every callback process-independent.
-- [ ] Stop the Provider operation if the Run Event sink rejects progress.
+- [x] Make every callback process-independent.
+- [x] Stop the Provider operation if the Run Event sink rejects progress.
 
 ### Text Terminal
 
-- [ ] Revalidate the successful terminal Provider Response.
-- [ ] Use complete Message output items as final authority.
-- [ ] Complete only when no calls exist and final joined text is non-empty.
-- [ ] Treat no calls plus only empty/no Message output as protocol failure.
-- [ ] Emit TurnCompleted before RunCompleted.
-- [ ] Return one Agent Result with exact counts and final response.
+- [x] Revalidate the successful terminal Provider Response.
+- [x] Use complete Message output items as final authority.
+- [x] Complete only when no calls exist and final joined text is non-empty.
+- [x] Treat no calls plus only empty/no Message output as protocol failure.
+- [x] Emit TurnCompleted before RunCompleted.
+- [x] Return one Agent Result with exact counts and final response.
 
 ### Tests With Fake Provider
 
-- [ ] Final text on the first turn.
-- [ ] Multiple Message items joined deterministically.
-- [ ] TextDelta event order and fields.
-- [ ] Event sink backpressure and rejection.
-- [ ] Callback works when invoked from a process other than Runner.
-- [ ] Final Response remains authoritative when progress is incomplete.
-- [ ] Progress-only ToolCall executes nothing.
-- [ ] Empty completed response fails without looping.
-- [ ] Fake script is exhausted exactly once.
+- [x] Final text on the first turn.
+- [x] Multiple Message items joined deterministically.
+- [x] TextDelta event order and fields.
+- [x] Event sink backpressure and rejection.
+- [x] Callback works when invoked from a process other than Runner.
+- [x] Final Response remains authoritative when progress is incomplete.
+- [x] Progress-only ToolCall executes nothing.
+- [x] Empty completed response fails without looping.
+- [x] Fake script is exhausted exactly once.
 
 ### Documentation And Learning
 
-- [ ] Explain logical turn versus Provider attempt.
-- [ ] Explain why Runner does not reconstruct terminal output from deltas.
-- [ ] Explain synchronous event backpressure and callback process independence.
-- [ ] Add one text-only Runner example using Fake.
+- [x] Explain logical turn versus Provider attempt.
+- [x] Explain why Runner does not reconstruct terminal output from deltas.
+- [x] Explain synchronous event backpressure and callback process independence.
+- [x] Add one text-only Runner example using Fake.
 
 ### Phase Complete When
 
-- [ ] A deterministic text-only Run emits exact events and returns final text.
-- [ ] No Tool operation exists in this phase.
-- [ ] Empty success cannot create an unproductive loop.
-- [ ] Agent imports no Req, SSE, Tokamak transport, or terminal modules.
+- [x] A deterministic text-only Run emits exact events and returns final text.
+- [x] No Tool operation exists in this phase.
+- [x] Empty success cannot create an unproductive loop.
+- [x] Agent imports no Req, SSE, Tokamak transport, or terminal modules.
 
 ## Phase 4: Implement Function-Call Admission
 
 ### Authoritative Extraction
 
-- [ ] Read FunctionCalls only from a successful terminal Response.
-- [ ] Preserve complete Response output-item source order.
-- [ ] Retain each original FunctionCall for conversation projection.
-- [ ] Convert every FunctionCall through `Tool.Call.from_provider/2` under the
+- [x] Read FunctionCalls only from a successful terminal Response.
+- [x] Preserve complete Response output-item source order.
+- [x] Retain each original FunctionCall for conversation projection.
+- [x] Convert every FunctionCall through `Tool.Call.from_provider/2` under the
   effective Tool Limits.
-- [ ] Never convert model names to atoms or modules.
+- [x] Never convert model names to atoms or modules.
 
 ### Whole-Batch Preflight
 
-- [ ] Preflight every call before creating the first Tool Context.
-- [ ] Reject the whole batch if any call is unconstructable.
-- [ ] Reject the whole batch if its count exceeds remaining Tool-call budget.
-- [ ] Detect duplicate call IDs defensively even though Response validation already
+- [x] Preflight every call before creating the first Tool Context.
+- [x] Reject the whole batch if any call is unconstructable.
+- [x] Reject the whole batch if its count exceeds remaining Tool-call budget.
+- [x] Detect duplicate call IDs defensively even though Response validation already
   rejects them.
-- [ ] Preserve unknown Tool names as valid Calls for Executor to pair as errors.
-- [ ] Preserve exact decoded string-keyed arguments without reinterpretation.
-- [ ] Leave built-in argument validation and capability checks to Executor.
+- [x] Preserve unknown Tool names as valid Calls for Executor to pair as errors.
+- [x] Preserve exact decoded string-keyed arguments without reinterpretation.
+- [x] Leave built-in argument validation and capability checks to Executor.
 
 ### Mixed Output
 
-- [ ] Retain assistant Messages that occur before, between, or after calls.
-- [ ] Do not classify mixed text as final while calls remain.
-- [ ] Account all admitted terminal output before executing side effects.
-- [ ] Fail output budget before Tool execution when the Provider response itself
+- [x] Retain assistant Messages that occur before, between, or after calls.
+- [x] Do not classify mixed text as final while calls remain.
+- [x] Account all admitted terminal output before executing side effects.
+- [x] Fail output budget before Tool execution when the Provider response itself
   already exceeds the remaining budget.
 
 ### Tests
 
-- [ ] One complete Read call.
-- [ ] All four complete built-in call shapes.
-- [ ] Multiple calls preserve Response source order even when progress-completion
+- [x] One complete Read call.
+- [x] All four complete built-in call shapes.
+- [x] Multiple calls preserve Response source order even when progress-completion
   events arrived in another order.
-- [ ] Unknown name remains admissible for paired Executor rejection.
-- [ ] Oversized call ID, name, arguments, entry count, and depth reject the batch.
-- [ ] A valid first call plus malformed later call executes neither.
-- [ ] Batch over remaining Tool-call budget executes none.
-- [ ] Failed and interrupted Provider terminals execute none.
-- [ ] Bare FunctionCall and ToolCallCompleted inputs execute none.
-- [ ] Mixed assistant text is retained but does not finish the run.
+- [x] Unknown name remains admissible for paired Executor rejection.
+- [x] Oversized call ID, name, arguments, entry count, and depth reject the batch.
+- [x] A valid first call plus malformed later call executes neither.
+- [x] Batch over remaining Tool-call budget executes none.
+- [x] Failed and interrupted Provider terminals execute none.
+- [x] Bare FunctionCall and ToolCallCompleted inputs execute none.
+- [x] Mixed assistant text is retained but does not finish the run.
 
 ### Documentation And Learning
 
-- [ ] Explain structural admission versus built-in argument validation.
-- [ ] Explain why unknown names remain pairable Calls.
-- [ ] Explain why batch preflight is a side-effect safety boundary.
-- [ ] Add a source-order diagram contrasting progress events and terminal output.
+- [x] Explain structural admission versus built-in argument validation.
+- [x] Explain why unknown names remain pairable Calls.
+- [x] Explain why batch preflight is a side-effect safety boundary.
+- [x] Add a source-order diagram contrasting progress events and terminal output.
 
 ### Phase Complete When
 
-- [ ] No malformed call batch can partially execute.
-- [ ] Provider item IDs remain outside Tool Call.
-- [ ] Every admitted Call has complete bounded string-keyed arguments.
-- [ ] Admission remains pure and performs no host operation.
+- [x] No malformed call batch can partially execute.
+- [x] Provider item IDs remain outside Tool Call.
+- [x] Every admitted Call has complete bounded string-keyed arguments.
+- [x] Admission remains pure and performs no host operation.
 
 ## Phase 5: Implement Sequential Tool Execution
 
 ### Tool Context Construction
 
-- [ ] Generate one distinct bounded operation ID per admitted call.
-- [ ] Build Tool Context from Runtime-owned Workspace Handle, Run capabilities,
+- [x] Generate one distinct bounded operation ID per admitted call.
+- [x] Build Tool Context from Runtime-owned Workspace Handle, Run capabilities,
   Tool Limits, cancellation, effective deadline, and Tool activity sink.
-- [ ] Do not pass Provider item ID or call ID as Workspace operation ID.
-- [ ] Do not lower or enlarge capabilities from model arguments.
-- [ ] Validate Context before ToolStarted so invalid trusted context starts no Tool.
+- [x] Do not pass Provider item ID or call ID as Workspace operation ID.
+- [x] Do not lower or enlarge capabilities from model arguments.
+- [x] Validate Context before ToolStarted so invalid trusted context starts no Tool.
 
 ### Event And Execution Order
 
-- [ ] Emit ToolStarted immediately before Executor invocation.
-- [ ] Call `Tool.Executor.execute/2` synchronously once.
-- [ ] Require a typed paired Result for every preflighted Call.
-- [ ] Treat unexpected `{:error, :invalid_call}` after successful preflight as an
+- [x] Emit ToolStarted immediately before Executor invocation.
+- [x] Call `Tool.Executor.execute/2` synchronously once.
+- [x] Require a typed paired Result for every preflighted Call.
+- [x] Treat unexpected `{:error, :invalid_call}` after successful preflight as an
   Agent internal contract failure.
-- [ ] Emit ToolCompleted after retaining the Result.
-- [ ] Include only status and safe local metadata in ToolCompleted.
-- [ ] Continue later admitted calls after `:ok` and ordinary `:error`.
-- [ ] Stop later calls immediately after `:ambiguous`.
+- [x] Emit ToolCompleted after retaining the Result.
+- [x] Include only status and safe local metadata in ToolCompleted.
+- [x] Continue later admitted calls after `:ok` and ordinary `:error`.
+- [x] Stop later calls immediately after `:ambiguous`.
 
 ### Ambiguity
 
-- [ ] Retain the ambiguous call/result pair in terminal local State or Error
+- [x] Retain the ambiguous call/result pair in terminal local State or Error
   correlation.
-- [ ] Do not append an incomplete batch to a next Provider Request.
-- [ ] Do not synthesize outputs for calls never executed.
-- [ ] Do not retry, inspect, reconcile, or roll back automatically.
-- [ ] Return `tool_ambiguous` with no model-visible Result content in Agent details.
+- [x] Do not append an incomplete batch to a next Provider Request.
+- [x] Do not synthesize outputs for calls never executed.
+- [x] Do not retry, inspect, reconcile, or roll back automatically.
+- [x] Return `tool_ambiguous` with no model-visible Result content in Agent details.
 
 ### Tests With Fake Workspace
 
-- [ ] One successful Read.
-- [ ] Read, Write, Edit, and Bash in one response source order.
-- [ ] Unknown, invalid, denied, stale, and natural Bash failure remain paired and
+- [x] One successful Read.
+- [x] Read, Write, Edit, and Bash in one response source order.
+- [x] Unknown, invalid, denied, stale, and natural Bash failure remain paired and
   do not stop later calls.
-- [ ] Exact ToolStarted/ToolCompleted order and operation IDs.
-- [ ] ToolCompleted excludes Result content and arguments.
-- [ ] Invalid trusted Tool Context executes no Workspace operation.
-- [ ] Executor admission mismatch terminates defensively.
-- [ ] Ambiguous Write stops later Bash.
-- [ ] Ambiguous Bash stops later Read.
-- [ ] Event sink failure before ToolStarted executes nothing.
-- [ ] Event sink failure after a known Result starts no later Tool.
-- [ ] Fake Workspace reports exact remaining operations after every stop case.
+- [x] Exact ToolStarted/ToolCompleted order and operation IDs.
+- [x] ToolCompleted excludes Result content and arguments.
+- [x] Invalid trusted Tool Context executes no Workspace operation.
+- [x] Executor admission mismatch terminates defensively.
+- [x] Ambiguous Write stops later Bash.
+- [x] Ambiguous Bash stops later Read.
+- [x] Event sink failure before ToolStarted executes nothing.
+- [x] Event sink failure after a known Result starts no later Tool.
+- [x] Fake Workspace reports exact remaining operations after every stop case.
 
 ### Documentation And Learning
 
-- [ ] Explain Agent-owned source-order iteration versus one-call Executor.
-- [ ] Explain why ordinary errors are model feedback but ambiguity is terminal.
-- [ ] Explain exact Tool Context authority flow into Workspace.
-- [ ] Add a call/result/event sequence diagram.
+- [x] Explain Agent-owned source-order iteration versus one-call Executor.
+- [x] Explain why ordinary errors are model feedback but ambiguity is terminal.
+- [x] Explain exact Tool Context authority flow into Workspace.
+- [x] Add a call/result/event sequence diagram.
 
 ### Phase Complete When
 
-- [ ] Every admitted non-ambiguous call receives one paired Result in order.
-- [ ] No later call begins after ambiguity or event-sink failure.
-- [ ] Agent calls no Workspace facade directly.
-- [ ] Tool policy depends on typed status, never parsed Result JSON.
+- [x] Every admitted non-ambiguous call receives one paired Result in order.
+- [x] No later call begins after ambiguity or event-sink failure.
+- [x] Agent calls no Workspace facade directly.
+- [x] Tool policy depends on typed status, never parsed Result JSON.
 
 ## Phase 6: Implement Continuation And Multi-Turn Loop
 
 ### Conversation Mutation
 
-- [ ] Project every successful terminal Response output item.
-- [ ] Insert each executed Result immediately after its matching FunctionCall.
-- [ ] Preserve assistant Messages around function calls.
-- [ ] Append the complete projected turn atomically to new State.
-- [ ] Never mutate prior input item lists in place.
-- [ ] Validate the complete next input through Provider Request construction.
+- [x] Project every successful terminal Response output item.
+- [x] Insert each executed Result immediately after its matching FunctionCall.
+- [x] Preserve assistant Messages around function calls.
+- [x] Append the complete projected turn atomically to new State.
+- [x] Never mutate prior input item lists in place.
+- [x] Validate the complete next input through Provider Request construction.
 
 ### Loop Continuation
 
-- [ ] Emit TurnCompleted with `outcome: :continued` after a complete known Tool
+- [x] Emit TurnCompleted with `outcome: :continued` after a complete known Tool
   batch is appended.
-- [ ] Check cancellation and all budgets before the next turn.
-- [ ] Increment logical turn exactly once.
-- [ ] Build the next immutable Request from full projected history.
-- [ ] Repeat until final text or terminal Error.
-- [ ] Leave follow-up messages and steering queues deferred.
+- [x] Check cancellation and all budgets before the next turn.
+- [x] Increment logical turn exactly once.
+- [x] Build the next immutable Request from full projected history.
+- [x] Repeat until final text or terminal Error.
+- [x] Leave follow-up messages and steering queues deferred.
 
 ### Decisive Fake Integration
 
-- [ ] Assert the exact first Fake Provider Request.
-- [ ] Return one complete FunctionCall response.
-- [ ] Execute through Tool Executor and Fake Workspace.
-- [ ] Assert the exact second Fake Provider Request with retained FunctionCall and
+- [x] Assert the exact first Fake Provider Request.
+- [x] Return one complete FunctionCall response.
+- [x] Execute through Tool Executor and Fake Workspace.
+- [x] Assert the exact second Fake Provider Request with retained FunctionCall and
   paired Result content.
-- [ ] Return final text and assert Agent Result.
-- [ ] Assert both Provider and Workspace scripts are exhausted.
+- [x] Return final text and assert Agent Result.
+- [x] Assert both Provider and Workspace scripts are exhausted.
 
 ### Scenarios
 
-- [ ] One Read round trip then final text.
-- [ ] Read, Write, Bash, then final text.
-- [ ] Read, Edit, Bash, then final text.
-- [ ] Multiple calls in one response then final text.
-- [ ] Unknown Tool Result followed by model correction.
-- [ ] Invalid arguments followed by corrected call.
-- [ ] Stale revision followed by reread and corrected mutation.
-- [ ] Natural non-zero Bash followed by model diagnosis.
-- [ ] Mixed assistant text and Tool calls across turns.
-- [ ] Final text after the maximum permitted logical turn.
+- [x] One Read round trip then final text.
+- [x] Read, Write, Bash, then final text.
+- [x] Read, Edit, Bash, then final text.
+- [x] Multiple calls in one response then final text.
+- [x] Unknown Tool Result followed by model correction.
+- [x] Invalid arguments followed by corrected call.
+- [x] Stale revision followed by reread and corrected mutation.
+- [x] Natural non-zero Bash followed by model diagnosis.
+- [x] Mixed assistant text and Tool calls across turns.
+- [x] Final text after the maximum permitted logical turn.
 
 ### Documentation And Learning
 
-- [ ] Explain why full conversation is projected rather than relying on provider
+- [x] Explain why full conversation is projected rather than relying on provider
   account state.
-- [ ] Explain why conversation append occurs only after a complete known batch.
-- [ ] Explain why context compaction cannot split call/result pairs.
-- [ ] Add the full Fake Provider-to-Tool-to-final sequence as an ExDoc example.
+- [x] Explain why conversation append occurs only after a complete known batch.
+- [x] Explain why context compaction cannot split call/result pairs.
+- [x] Add the full Fake Provider-to-Tool-to-final sequence as an ExDoc example.
 
 ### Phase Complete When
 
-- [ ] Fake Provider completes `read -> write -> bash -> final text`
+- [x] Fake Provider completes `read -> write -> bash -> final text`
   deterministically.
-- [ ] Exact second-turn Request proves correct continuation pairing.
-- [ ] Ordinary Tool failures can be corrected by a later model turn.
-- [ ] No test requires network credentials, wall-clock sleep, or user files.
+- [x] Exact second-turn Request proves correct continuation pairing.
+- [x] Ordinary Tool failures can be corrected by a later model turn.
+- [x] No test requires network credentials, wall-clock sleep, or user files.
 
 ## Phase 7: Implement Budgets And Deadlines
 
 ### Accounting
 
-- [ ] Count logical turns at turn admission.
-- [ ] Count Provider retries separately from turns.
-- [ ] Count Tool calls at execution admission.
-- [ ] Count complete normalized Provider output after terminal success.
-- [ ] Count Result content after every known Tool completion.
-- [ ] Use checked non-negative integer arithmetic.
-- [ ] Retain counters in immutable State and terminal Result/Error.
+- [x] Count logical turns at turn admission.
+- [x] Count Provider retries separately from turns.
+- [x] Count Tool calls at execution admission.
+- [x] Count complete normalized Provider output after terminal success.
+- [x] Count Result content after every known Tool completion.
+- [x] Use checked non-negative integer arithmetic.
+- [x] Retain counters in immutable State and terminal Result/Error.
 
 ### Wall Time
 
-- [ ] Record monotonic `started_at` once.
-- [ ] Calculate Budget deadline with overflow-safe arithmetic.
-- [ ] Use the earlier of Budget and Runtime deadlines.
-- [ ] Pass the same effective absolute deadline to Provider and Tool contexts.
-- [ ] Check deadline before every operation and continuation.
-- [ ] Never treat wall-clock time or system timezone as run lifetime.
+- [x] Record monotonic `started_at` once.
+- [x] Calculate Budget deadline with overflow-safe arithmetic.
+- [x] Use the earlier of Budget and Runtime deadlines.
+- [x] Pass the same effective absolute deadline to Provider and Tool contexts.
+- [x] Check deadline before every operation and continuation.
+- [x] Never treat wall-clock time or system timezone as run lifetime.
 
 ### Exhaustion Policy
 
-- [ ] Complete successfully when final text arrives at the exact limit.
-- [ ] Fail before starting a turn beyond `max_turns`.
-- [ ] Fail an over-budget Tool batch before executing its first call.
-- [ ] Stop later work when known Result content crosses output budget.
-- [ ] Return one structured dimension-specific budget Error.
-- [ ] Emit TurnCompleted and RunFailed where the event sink remains usable.
-- [ ] Never ask the model to decide whether a Budget may be exceeded.
+- [x] Complete successfully when final text arrives at the exact limit.
+- [x] Fail before starting a turn beyond `max_turns`.
+- [x] Fail an over-budget Tool batch before executing its first call.
+- [x] Stop later work when known Result content crosses output budget.
+- [x] Return one structured dimension-specific budget Error.
+- [x] Emit TurnCompleted and RunFailed where the event sink remains usable.
+- [x] Never ask the model to decide whether a Budget may be exceeded.
 
 ### Tests
 
-- [ ] Exact turn limit and one beyond.
-- [ ] Exact Tool-call limit and an over-limit batch with zero execution.
-- [ ] Exact output limit and one byte beyond for provider text.
-- [ ] Exact output limit and one byte beyond after Tool Result.
-- [ ] Effective earlier Runtime deadline.
-- [ ] Already elapsed deadline starts no Provider attempt.
-- [ ] Deadline between turns starts no next turn.
-- [ ] Deadline between Tool calls starts no later call.
-- [ ] Checked arithmetic overflow fails closed.
-- [ ] Deterministic pure deadline/accounting tests use supplied timestamps rather
+- [x] Exact turn limit and one beyond.
+- [x] Exact Tool-call limit and an over-limit batch with zero execution.
+- [x] Exact output limit and one byte beyond for provider text.
+- [x] Exact output limit and one byte beyond after Tool Result.
+- [x] Effective earlier Runtime deadline.
+- [x] Already elapsed deadline starts no Provider attempt.
+- [x] Deadline between turns starts no next turn.
+- [x] Deadline between Tool calls starts no later call.
+- [x] Checked arithmetic overflow fails closed.
+- [x] Deterministic pure deadline/accounting tests use supplied timestamps rather
   than sleeps.
 
 ### Documentation And Learning
 
-- [ ] Document every Budget field, unit, default, and protected resource.
-- [ ] Explain logical-turn counting across Provider retries.
-- [ ] Explain why whole-batch Tool budget admission is atomic.
-- [ ] Explain lower-level hard limits versus Agent aggregate Budget.
+- [x] Document every Budget field, unit, default, and protected resource.
+- [x] Explain logical-turn counting across Provider retries.
+- [x] Explain why whole-batch Tool budget admission is atomic.
+- [x] Explain lower-level hard limits versus Agent aggregate Budget.
 
 ### Phase Complete When
 
-- [ ] Every loop dimension has one tested terminal boundary.
-- [ ] Budget exhaustion starts no later operation.
-- [ ] Wall-time tests are deterministic and sleep-free.
-- [ ] Errors identify limits without exposing content.
+- [x] Every loop dimension has one tested terminal boundary.
+- [x] Budget exhaustion starts no later operation.
+- [x] Wall-time tests are deterministic and sleep-free.
+- [x] Errors identify limits without exposing content.
 
 ## Phase 8: Implement Retry, Interruption, And Cancellation
 
 ### Safe Provider Retry
 
-- [ ] Evaluate `retryable` and `output_started` independently.
-- [ ] Retry only when retryable is true and output_started is false.
-- [ ] Reuse the exact immutable Provider Request.
-- [ ] Allocate a new Provider operation ID for every attempt.
-- [ ] Retain one logical turn number across attempts.
-- [ ] Apply bounded retry delay without exceeding effective deadline.
-- [ ] Check out-of-band cancellation before and during retry wait.
-- [ ] Stop at `max_provider_retries` and return provider retry exhaustion.
-- [ ] Never retry configuration, authentication, authorization, protocol, or
+- [x] Evaluate `retryable` and `output_started` independently.
+- [x] Retry only when retryable is true and output_started is false.
+- [x] Reuse the exact immutable Provider Request.
+- [x] Allocate a new Provider operation ID for every attempt.
+- [x] Retain one logical turn number across attempts.
+- [x] Apply bounded retry delay without exceeding effective deadline.
+- [x] Check out-of-band cancellation before and during retry wait.
+- [x] Stop at `max_provider_retries` and return provider retry exhaustion.
+- [x] Never retry configuration, authentication, authorization, protocol, or
   explicit cancellation failures unless a future documented policy says so.
 
 ### Partial Output And Interruption
 
-- [ ] Treat every Provider Error with output_started true as terminal.
-- [ ] Emit no second Provider attempt after streamed text or Tool progress.
-- [ ] Execute no call staged by an interrupted response.
-- [ ] Return RunInterrupted for cancellation, timeout, and partial-stream
+- [x] Treat every Provider Error with output_started true as terminal.
+- [x] Emit no second Provider attempt after streamed text or Tool progress.
+- [x] Execute no call staged by an interrupted response.
+- [x] Return RunInterrupted for cancellation, timeout, and partial-stream
   interruption classifications.
-- [ ] Preserve safe Provider classification in Agent Error details.
-- [ ] Do not pretend partial text is a completed Agent Result.
+- [x] Preserve safe Provider classification in Agent Error details.
+- [x] Do not pretend partial text is a completed Agent Result.
 
 ### Run Cancellation
 
-- [ ] Check the persistent cancellation probe before every operation.
-- [ ] Pass the matching operation cancel reference to Provider and Tool contexts.
-- [ ] Recheck the persistent probe after lower operations return.
-- [ ] Do not infer cancellation by parsing Tool Result content.
-- [ ] If a cancelled Tool returns ambiguous, preserve ambiguity as the stronger
+- [x] Check the persistent cancellation probe before every operation.
+- [x] Pass the matching operation cancel reference to Provider and Tool contexts.
+- [x] Recheck the persistent probe after lower operations return.
+- [x] Do not infer cancellation by parsing Tool Result content.
+- [x] If a cancelled Tool returns ambiguous, preserve ambiguity as the stronger
   side-effect outcome while classifying the run as interrupted with ambiguity
   evidence.
-- [ ] Start no later Tool or Provider operation after cancellation.
-- [ ] Keep actual message routing and active-operation tracking for Runtime Phase 5.
+- [x] Start no later Tool or Provider operation after cancellation.
+- [x] Keep actual message routing and active-operation tracking for Runtime Phase 5.
 
 ### Tests With Fake Provider And Workspace
 
-- [ ] Retryable transport failure before output then final text.
-- [ ] Two safe failures then success at exact retry limit.
-- [ ] Retry exhaustion.
-- [ ] Retry Request equality with distinct operation IDs.
-- [ ] Retry does not increment logical turn.
-- [ ] Retry delay policy receives expected attempt ordinal.
-- [ ] Cancellation during retry wait.
-- [ ] Non-retryable failure before output.
-- [ ] Retryable failure after TextDelta does not retry.
-- [ ] Interrupted ToolCall progress executes nothing and does not retry.
-- [ ] Cancellation before first turn.
-- [ ] Cancellation during Provider operation.
-- [ ] Cancellation during known-not-applied Tool operation.
-- [ ] Cancellation producing ambiguous Tool outcome.
-- [ ] Persistent cancellation remains observable after lower layer consumes the
+- [x] Retryable transport failure before output then final text.
+- [x] Two safe failures then success at exact retry limit.
+- [x] Retry exhaustion.
+- [x] Retry Request equality with distinct operation IDs.
+- [x] Retry does not increment logical turn.
+- [x] Retry delay policy receives expected attempt ordinal.
+- [x] Cancellation during retry wait.
+- [x] Non-retryable failure before output.
+- [x] Retryable failure after TextDelta does not retry.
+- [x] Interrupted ToolCall progress executes nothing and does not retry.
+- [x] Cancellation before first turn.
+- [x] Cancellation during Provider operation.
+- [x] Cancellation during known-not-applied Tool operation.
+- [x] Cancellation producing ambiguous Tool outcome.
+- [x] Persistent cancellation remains observable after lower layer consumes the
   mailbox message.
 
 ### Documentation And Learning
 
-- [ ] Explain semantic retry policy versus Runtime process supervision.
-- [ ] Explain why exact Request reuse is required.
-- [ ] Explain why output visibility blocks transparent replay.
-- [ ] Add retry and cancellation sequence diagrams.
-- [ ] Document the MVP cancellation seam and what Runtime still must implement.
+- [x] Explain semantic retry policy versus Runtime process supervision.
+- [x] Explain why exact Request reuse is required.
+- [x] Explain why output visibility blocks transparent replay.
+- [x] Add retry and cancellation sequence diagrams.
+- [x] Document the MVP cancellation seam and what Runtime still must implement.
 
 ### Phase Complete When
 
-- [ ] Every safe retry is bounded, pre-output, and exact-request.
-- [ ] No partial Provider output or Tool operation is replayed.
-- [ ] Cancellation starts no later operation.
-- [ ] Interruption and ordinary failure remain distinguishable.
+- [x] Every safe retry is bounded, pre-output, and exact-request.
+- [x] No partial Provider output or Tool operation is replayed.
+- [x] Cancellation starts no later operation.
+- [x] Interruption and ordinary failure remain distinguishable.
 
 ## Phase 9: Deterministic Integration And Live Acceptance
 
 ### Full Deterministic Scenario
 
-- [ ] Open one scripted Fake Workspace Handle under full local MVP access.
-- [ ] Configure one multi-turn Fake Provider script with exact Requests.
-- [ ] Run `read -> write -> bash -> final text` through public Runner.
-- [ ] Assert exact Run Event order and terminal Result counts.
-- [ ] Assert every Provider attempt and Tool operation ID is distinct.
-- [ ] Assert exact call/result pairing and continuation item order.
-- [ ] Assert Provider and Workspace scripts are exhausted.
-- [ ] Assert no direct host or network side effect occurred.
+- [x] Open one scripted Fake Workspace Handle under full local MVP access.
+- [x] Configure one multi-turn Fake Provider script with exact Requests.
+- [x] Run `read -> write -> bash -> final text` through public Runner.
+- [x] Assert exact Run Event order and terminal Result counts.
+- [x] Assert every Provider attempt and Tool operation ID is distinct.
+- [x] Assert exact call/result pairing and continuation item order.
+- [x] Assert Provider and Workspace scripts are exhausted.
+- [x] Assert no direct host or network side effect occurred.
 
 ### Failure Matrix Integration
 
-- [ ] Provider permanent failure before output.
-- [ ] Provider safe retry then success.
-- [ ] Provider interruption after output.
-- [ ] Malformed later call with zero batch execution.
-- [ ] Unknown/invalid/denied Tool correction.
-- [ ] Stale revision correction.
-- [ ] Tool ambiguity with later call not admitted.
-- [ ] Turn, call, output, wall-time, and retry exhaustion.
-- [ ] Cancellation at every safe boundary.
-- [ ] Run Event sink failure before and after a known operation.
+- [x] Provider permanent failure before output.
+- [x] Provider safe retry then success.
+- [x] Provider interruption after output.
+- [x] Malformed later call with zero batch execution.
+- [x] Unknown/invalid/denied Tool correction.
+- [x] Stale revision correction.
+- [x] Tool ambiguity with later call not admitted.
+- [x] Turn, call, output, wall-time, and retry exhaustion.
+- [x] Cancellation at every safe boundary.
+- [x] Run Event sink failure before and after a known operation.
 
 ### Temporary Real Workspace Integration
 
-- [ ] Open a synthetic temporary project root through Workspace.
-- [ ] Use Fake Provider to request a bounded Read, revision-checked Write or Edit,
+- [x] Open a synthetic temporary project root through Workspace.
+- [x] Use Fake Provider to request a bounded Read, revision-checked Write or Edit,
   and harmless Bash verification.
-- [ ] Run through public Agent Runner and real Tool Executor.
-- [ ] Verify resulting file content and Bash exit evidence independently.
-- [ ] Close the Handle in the test harness even when Runner fails.
-- [ ] Confirm Agent code itself uses no File or System API.
+- [x] Run through public Agent Runner and real Tool Executor.
+- [x] Verify resulting file content and Bash exit evidence independently.
+- [x] Close the Handle in the test harness even when Runner fails.
+- [x] Confirm Agent code itself uses no File or System API.
 
 ### Live Tokamak Acceptance
 
-- [ ] Mark live tests `:live_tokamak` and exclude them by default.
-- [ ] Require runtime `TOKAMAK_API_KEY` and `SYNAPSE_MODEL`.
-- [ ] Use a new synthetic temporary Workspace only.
-- [ ] Ask Tokamak to read a fixture, create a small file, and verify it with Bash.
-- [ ] Complete through public Agent Runner without internal manual calls.
-- [ ] Assert at least one Tool was called and final text is non-empty.
-- [ ] Verify the expected file and command result independently of model text.
-- [ ] Record no live prompt, output, response ID, absolute path, account metadata,
+- [x] Mark live tests `:live_tokamak` and exclude them by default.
+- [x] Require runtime `TOKAMAK_API_KEY` and `SYNAPSE_MODEL`.
+- [x] Use a new synthetic temporary Workspace only.
+- [x] Ask Tokamak to read a fixture, create a small file, and verify it with Bash.
+- [x] Complete through public Agent Runner without internal manual calls.
+- [x] Assert at least one Tool was called and final text is non-empty.
+- [x] Verify the expected file and command result independently of model text.
+- [x] Record no live prompt, output, response ID, absolute path, account metadata,
   or credential in fixtures.
-- [ ] Never run the live test from untrusted pull requests.
+- [x] Never run the live test from untrusted pull requests.
 
 ### Boundary Audits
 
-- [ ] Static search confirms Agent modules call no Req, Finch, File, System, Port,
+- [x] Static search confirms Agent modules call no Req, Finch, File, System, Port,
   MuonTrap, Runtime, CLI, or terminal APIs.
-- [ ] Agent calls Workspace only indirectly through Tool Executor.
-- [ ] Every deterministic external operation appears in a Fake script.
-- [ ] No deterministic test depends on wall-clock sleep or concurrent sender order.
-- [ ] Live and Real tests clean temporary resources on every terminal path.
+- [x] Agent calls Workspace only indirectly through Tool Executor.
+- [x] Every deterministic external operation appears in a Fake script.
+- [x] No deterministic test depends on wall-clock sleep or concurrent sender order.
+- [x] Live and Real tests clean temporary resources on every terminal path.
 
 ### Documentation And Learning
 
-- [ ] Explain what deterministic Fake, temporary Real, and live Tokamak tests each
+- [x] Explain what deterministic Fake, temporary Real, and live Tokamak tests each
   prove and do not prove.
-- [ ] Add complete Run Request-to-Agent Result sequence diagram.
-- [ ] Explain why independent file/command verification is stronger than model
+- [x] Add complete Run Request-to-Agent Result sequence diagram.
+- [x] Explain why independent file/command verification is stronger than model
   claims.
-- [ ] Explain why this phase still does not implement workflow acceptance.
+- [x] Explain why this phase still does not implement workflow acceptance.
 
 ### Phase Complete When
 
-- [ ] The full coding loop passes deterministically without network access.
-- [ ] The same Runner completes one opt-in live Tokamak coding task.
-- [ ] Independent evidence verifies live side effects.
-- [ ] No user checkout, live secret, or identifying transcript enters tests.
+- [x] The full coding loop passes deterministically without network access.
+- [x] The same Runner completes one opt-in live Tokamak coding task.
+- [x] Independent evidence verifies live side effects.
+- [x] No user checkout, live secret, or identifying transcript enters tests.
 
 ## Phase 10: Reliability, Security, And ExDoc Review
 
 ### Failure Injection
 
-- [ ] Inject invalid Request, Context, Budget, Provider module, Handle, sink, and
+- [x] Inject invalid Request, Context, Budget, Provider module, Handle, sink, and
   cancellation dependencies.
-- [ ] Inject Provider exception/throw/exit through a dedicated test implementation
+- [x] Inject Provider exception/throw/exit through a dedicated test implementation
   only where Runner is responsible rather than future Runtime.
-- [ ] Inject malformed successful Response and unsupported output item.
-- [ ] Inject every call-admission failure before side effects.
-- [ ] Inject Executor admission mismatch and malformed returned Result.
-- [ ] Inject event-sink failure at every event boundary.
-- [ ] Inject arithmetic overflow and every exhausted Budget dimension.
-- [ ] Confirm every expected terminal path returns one Result or Error.
-- [ ] Leave unexpected Runner process exits for Runtime crash-conversion tests.
+- [x] Inject malformed successful Response and unsupported output item.
+- [x] Inject every call-admission failure before side effects.
+- [x] Inject admission mismatch and malformed lower returns at the one-call Executor
+  boundary; retain Runner's defensive Result postcondition.
+- [x] Inject event-sink failure at every event boundary.
+- [x] Inject arithmetic overflow and every exhausted Budget dimension.
+- [x] Confirm every expected terminal path returns one Result or Error.
+- [x] Leave unexpected Runner process exits for Runtime crash-conversion tests.
 
 ### State And Resource Reliability
 
-- [ ] Prove one Runner owns one immutable State lineage.
-- [ ] Prove Provider callbacks retain no unbounded per-delta Agent state.
-- [ ] Prove no Agent process, Task, timer, ETS table, registry, or mailbox queue is
+- [x] Prove one Runner owns one immutable State lineage.
+- [x] Prove Provider callbacks retain no unbounded per-delta Agent state.
+- [x] Prove no Agent process, Task, timer, ETS table, registry, or mailbox queue is
   created without an explicit lifecycle requirement.
-- [ ] Stress maximum turns and Tool calls with bounded small fixtures.
-- [ ] Stress repeated unknown Tool names without atom growth.
-- [ ] Confirm completed Runs retain no Fake script owner or Workspace operation.
-- [ ] Confirm terminal State cannot continue.
+- [x] Stress maximum turns and Tool calls with bounded small fixtures.
+- [x] Stress repeated unknown Tool names without atom growth.
+- [x] Confirm completed Runs retain no Fake script owner or Workspace operation.
+- [x] Confirm terminal State cannot continue.
 
 ### Security Review
 
-- [ ] Search Agent structs for credentials, headers, raw roots, Handles, callbacks,
+- [x] Search Agent structs for credentials, headers, raw roots, Handles, callbacks,
   prompts, arbitrary model content, commands, and Tool arguments.
-- [ ] Search logs, errors, events, and inspection paths for content disclosure.
-- [ ] Test with recognizable synthetic credentials, paths, prompts, commands, and
+- [x] Search logs, errors, events, and inspection paths for content disclosure.
+- [x] Test with recognizable synthetic credentials, paths, prompts, commands, and
   process output.
-- [ ] Confirm model-derived names remain strings through Provider and Tool.
-- [ ] Confirm Provider module, capabilities, Handle, instructions, limits, sinks,
+- [x] Confirm model-derived names remain strings through Provider and Tool.
+- [x] Confirm Provider module, capabilities, Handle, instructions, limits, sinks,
   and operation IDs are trusted application data.
-- [ ] Confirm ToolCompleted and Agent Error do not copy Result content.
-- [ ] Confirm RunCompleted Result is content-bearing and redacted under ordinary
+- [x] Confirm ToolCompleted and Agent Error do not copy Result content.
+- [x] Confirm RunCompleted Result is content-bearing and redacted under ordinary
   inspection.
-- [ ] State that model-visible Tool output remains untrusted and may contain
+- [x] State that model-visible Tool output remains untrusted and may contain
   independently obtained sensitive data.
-- [ ] State that Agent, BEAM processes, Workspace, and Bash are not security
+- [x] State that Agent, BEAM processes, Workspace, and Bash are not security
   sandboxes.
 
 ### Documentation
 
-- [ ] Every public Run and Agent module has `@moduledoc`.
-- [ ] Every public function has purpose-oriented `@doc` and accurate `@spec`.
-- [ ] Every struct has `t()` and documented field ownership.
-- [ ] Add Agent modules to ExDoc groups.
-- [ ] Add `docs/learning/AGENT-LOOP.md` as the maintenance guide.
-- [ ] Add boundary, turn, continuation, retry, cancellation, budget, ambiguity,
+- [x] Every public Run and Agent module has `@moduledoc`.
+- [x] Every public function has purpose-oriented `@doc` and accurate `@spec`.
+- [x] Every struct has `t()` and documented field ownership.
+- [x] Add Agent modules to ExDoc groups.
+- [x] Add `docs/learning/AGENT-LOOP.md` as the maintenance guide.
+- [x] Add boundary, turn, continuation, retry, cancellation, budget, ambiguity,
   and terminal-state diagrams.
-- [ ] Add examples for text completion, Tool continuation, ordinary correction,
+- [x] Add examples for text completion, Tool continuation, ordinary correction,
   safe retry, cancellation, ambiguity, and Budget failure.
-- [ ] Update `README.md`, `PLAN.md`, completed component cross-links, and status.
-- [ ] Correct stale target-versus-MVP architecture language discovered by audit.
-- [ ] Document every deferred long-running harness capability.
+- [x] Update `README.md`, `PLAN.md`, completed component cross-links, and status.
+- [x] Correct stale target-versus-MVP architecture language discovered by audit.
+- [x] Document every deferred long-running harness capability.
 
 ### Comprehension Gate
 
-- [ ] Can the owner explain why Runner is a function in a Task rather than a
+- [x] Can the owner explain why Runner is a function in a Task rather than a
   GenServer?
-- [ ] Can the owner identify which process owns State and which process may invoke
+- [x] Can the owner identify which process owns State and which process may invoke
   Provider event callbacks?
-- [ ] Can the owner distinguish progress events from terminal authority?
-- [ ] Can the owner trace one user prompt into the first Provider Request?
-- [ ] Can the owner trace one FunctionCall and Result into the next Request?
-- [ ] Can the owner distinguish run ID, item ID, call ID, and operation ID?
-- [ ] Can the owner explain whole-batch preflight before side effects?
-- [ ] Can the owner distinguish ordinary Tool failure from ambiguity?
-- [ ] Can the owner list every condition required for Provider retry?
-- [ ] Can the owner explain why lower-layer cancellation message consumption needs
+- [x] Can the owner distinguish progress events from terminal authority?
+- [x] Can the owner trace one user prompt into the first Provider Request?
+- [x] Can the owner trace one FunctionCall and Result into the next Request?
+- [x] Can the owner distinguish run ID, item ID, call ID, and operation ID?
+- [x] Can the owner explain whole-batch preflight before side effects?
+- [x] Can the owner distinguish ordinary Tool failure from ambiguity?
+- [x] Can the owner list every condition required for Provider retry?
+- [x] Can the owner explain why lower-layer cancellation message consumption needs
   a persistent Agent-level probe?
-- [ ] Can the owner calculate every Budget counter at one turn boundary?
-- [ ] Can the owner identify exactly which fields become model-visible?
-- [ ] Can the owner test the full loop without Tokamak or host side effects?
-- [ ] Can the owner explain why Agent completion is not task acceptance?
-- [ ] Can the owner list all deferred Agent and harness capabilities?
+- [x] Can the owner calculate every Budget counter at one turn boundary?
+- [x] Can the owner identify exactly which fields become model-visible?
+- [x] Can the owner test the full loop without Tokamak or host side effects?
+- [x] Can the owner explain why Agent completion is not task acceptance?
+- [x] Can the owner list all deferred Agent and harness capabilities?
 
 ### Phase Complete When
 
-- [ ] Reliability and security tests pass.
-- [ ] No unbounded Agent accumulator, callback state, queue, retry, or loop remains.
-- [ ] No Agent-generated log, event, error, fixture, example, or ordinary
-  inspection exposes credential or content-bearing data.
-- [ ] Every Tool side effect has a known paired Result or terminates as ambiguous.
-- [ ] `mix docs` succeeds without Agent documentation warnings.
-- [ ] All examples and doctests pass.
-- [ ] The Agent Loop can be maintained without the original design conversation.
+- [x] Reliability and security tests pass.
+- [x] No unbounded Agent accumulator, callback state, queue, retry, or loop remains.
+- [x] No Agent-generated log, Error, fixture, example, or ordinary inspection
+  exposes credential or arbitrary content; only the explicitly content-bearing
+  TextDelta and RunCompleted fields expose content to the trusted event sink.
+- [x] Every Tool side effect has a known paired Result or terminates as ambiguous.
+- [x] `mix docs` succeeds without Agent documentation warnings.
+- [x] All examples and doctests pass.
+- [x] The Agent Loop can be maintained without the original design conversation.
 
 ## Test Matrix
 
@@ -1571,30 +1606,30 @@ open, mutate, or execute commands in a user checkout.
 
 ## Agent Loop Definition Of Done
 
-- [ ] Phases 0 through 10 are complete.
-- [ ] Agent Loop boundary matches `PLAN.md`.
-- [ ] Shared Run Request, Run Event, and Budget contracts are implemented.
-- [ ] Runner executes as one synchronous bounded function suitable for a temporary
+- [x] Phases 0 through 10 are complete.
+- [x] Agent Loop boundary matches `PLAN.md`.
+- [x] Shared Run Request, Run Event, and Budget contracts are implemented.
+- [x] Runner executes as one synchronous bounded function suitable for a temporary
   supervised Task.
-- [ ] Every turn uses one immutable Provider Request snapshot.
-- [ ] Provider terminal Response is the sole execution authority.
-- [ ] Every call batch is fully preflighted before side effects.
-- [ ] Tool calls execute sequentially in Provider source order.
-- [ ] Every executed call receives one paired Result.
-- [ ] Ordinary Tool errors can drive model correction.
-- [ ] Ambiguous Tool outcome starts no later operation.
-- [ ] Exact function calls and outputs are retained in continuation context.
-- [ ] Provider retries are bounded, exact-request, and pre-output only.
-- [ ] Partial Provider output and Tool operations are never replayed.
-- [ ] Turn, Tool call, wall-time, output, and retry budgets terminate structurally.
-- [ ] Cancellation remains observable after a lower layer consumes its message.
-- [ ] Run Events are ordered, bounded, normalized, and UI-independent.
-- [ ] Agent imports no transport, host, Runtime, persistence, or terminal APIs.
-- [ ] Full deterministic tests require no live key or host side effects.
-- [ ] One opt-in live Tokamak coding loop passes in a temporary Workspace.
-- [ ] ExDoc explains ownership, projection, events, execution, retry, cancellation,
+- [x] Every turn uses one immutable Provider Request snapshot.
+- [x] Provider terminal Response is the sole execution authority.
+- [x] Every call batch is fully preflighted before side effects.
+- [x] Tool calls execute sequentially in Provider source order.
+- [x] Every executed call receives one paired Result.
+- [x] Ordinary Tool errors can drive model correction.
+- [x] Ambiguous Tool outcome starts no later operation.
+- [x] Exact function calls and outputs are retained in continuation context.
+- [x] Provider retries are bounded, exact-request, and pre-output only.
+- [x] Partial Provider output and Tool operations are never replayed.
+- [x] Turn, Tool call, wall-time, output, and retry budgets terminate structurally.
+- [x] Cancellation remains observable after a lower layer consumes its message.
+- [x] Run Events are ordered, bounded, normalized, and UI-independent.
+- [x] Agent imports no transport, host, Runtime, persistence, or terminal APIs.
+- [x] Full deterministic tests require no live key or host side effects.
+- [x] One opt-in live Tokamak coding loop passes in a temporary Workspace.
+- [x] ExDoc explains ownership, projection, events, execution, retry, cancellation,
   budgets, termination, security, and deferred work.
-- [ ] The owner can maintain Agent Loop without the original AI conversation.
+- [x] The owner can maintain Agent Loop without the original AI conversation.
 
 ## Deferred Agent Loop Work
 

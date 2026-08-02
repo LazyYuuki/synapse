@@ -74,6 +74,18 @@ defmodule Synapse.Provider.TokamakTest do
     assert [%Message{}] = response.output_items
   end
 
+  test "accepts a compatibility content type only after complete terminal SSE" do
+    adapter =
+      stream_adapter(200, [fixture_sse("text_stream")], [
+        {"content-type", "application/json"}
+      ])
+
+    assert {:ok, response} =
+             Tokamak.stream(request!(), fn _event -> :ok end, context!(), transport(adapter))
+
+    assert [%Message{}] = response.output_items
+  end
+
   test "builds the fixed POST request with canonical headers, body, and one-attempt policy" do
     test_pid = self()
 

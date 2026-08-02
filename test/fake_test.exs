@@ -63,8 +63,9 @@ defmodule Synapse.Provider.FakeTest do
     end)
   end
 
-  test "consumes a multi-turn tool interaction from another process" do
-    operation_id = operation_id("multi-turn")
+  test "consumes one multi-turn script through distinct operation IDs from another process" do
+    first_operation_id = operation_id("multi-turn-first")
+    second_operation_id = operation_id("multi-turn-second")
     test_pid = self()
     first_request = request!("read mix.exs")
     second_request = request!("continue with tool output")
@@ -95,7 +96,7 @@ defmodule Synapse.Provider.FakeTest do
        ], {:ok, final_response}}
     ]
 
-    Fake.with_script(operation_id, script, fn ->
+    Fake.with_script([first_operation_id, second_operation_id], script, fn ->
       task =
         Task.async(fn ->
           sink = fn event ->
@@ -103,16 +104,26 @@ defmodule Synapse.Provider.FakeTest do
             :ok
           end
 
-          first = Fake.stream(first_request, sink, context!(operation_id))
-          second = Fake.stream(second_request, sink, context!(operation_id))
-          {first, second}
+          first = Fake.stream(first_request, sink, context!(first_operation_id))
+
+          remaining =
+            {Fake.remaining_turns(first_operation_id), Fake.remaining_turns(second_operation_id)}
+
+          second = Fake.stream(second_request, sink, context!(second_operation_id))
+          {first, remaining, second}
         end)
 
-      assert {{:ok, ^tool_response}, {:ok, ^final_response}} = Task.await(task)
-      assert {:ok, 0} = Fake.remaining_turns(operation_id)
+      assert {{:ok, ^tool_response}, {{:ok, 1}, {:ok, 1}}, {:ok, ^final_response}} =
+               Task.await(task)
+
+      assert {:ok, 0} = Fake.remaining_turns(first_operation_id)
+      assert {:ok, 0} = Fake.remaining_turns(second_operation_id)
       assert_receive {:agent_event, %ToolCallCompleted{call_id: "call-read"}}
       assert_receive {:agent_event, %TextDelta{delta: "Finished"}}
     end)
+
+    assert {:error, :not_configured} = Fake.remaining_turns(first_operation_id)
+    assert {:error, :not_configured} = Fake.remaining_turns(second_operation_id)
   end
 
   test "emits multiple function calls exactly as scripted" do
@@ -308,6 +319,44 @@ defmodule Synapse.Provider.FakeTest do
 
     assert_raise ArgumentError, fn ->
       Fake.start_link(operation_id, [{:turn, [:raw_wire_event], :not_a_provider_result}])
+    end
+  end
+
+  test "rejects empty, duplicate, and malformed operation ID declarations" do
+    response = text_response("response-invalid-ids", "unused")
+    script = [{:turn, [], {:ok, response}}]
+    duplicate = operation_id("duplicate")
+
+    assert_raise ArgumentError, fn -> Fake.start_link([], script) end
+    assert_raise ArgumentError, fn -> Fake.start_link([duplicate, duplicate], script) end
+    assert_raise ArgumentError, fn -> Fake.start_link([operation_id("valid"), ""], script) end
+    assert_raise ArgumentError, fn -> Fake.start_link(:not_an_operation_id, script) end
+
+    assert_raise ArgumentError, fn ->
+      Fake.start_link(Enum.map(1..129, &operation_id("too-many-#{&1}")), script)
+    end
+
+    assert_raise ArgumentError, fn ->
+      Fake.start_link(String.duplicate("x", 513), script)
+    end
+  end
+
+  test "rejects an active operation ID without replacing its script owner" do
+    operation_id = operation_id("already-active")
+    partial_operation_id = operation_id("partial-registration")
+    response = text_response("response-already-active", "original")
+    script = [{:turn, [], {:ok, response}}]
+    {:ok, owner} = Fake.start_link(operation_id, script)
+
+    try do
+      assert {:error, {:already_started, existing_owner}} =
+               Fake.start_link([partial_operation_id, operation_id], script)
+
+      assert existing_owner == owner
+      assert {:ok, 1} = Fake.remaining_turns(operation_id)
+      assert {:error, :not_configured} = Fake.remaining_turns(partial_operation_id)
+    after
+      if Process.alive?(owner), do: Agent.stop(owner)
     end
   end
 

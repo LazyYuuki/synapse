@@ -22,13 +22,30 @@ bounded unknown-footprint Bash executable. Deterministic Provider-to-Tool
 integration, continuation pairing, live four-schema acceptance, and the final
 reliability, security, and ExDoc review are complete in
 [`docs/plan/PLAN-TOOL-SYSTEM.md`](docs/plan/PLAN-TOOL-SYSTEM.md). This document
-describes both current behavior and intended constraints.
+describes both current behavior and intended constraints. Agent Loop Phases 0-10
+have fixed the MVP turn, continuation, retry, cancellation, budget, event, and
+identity decisions; made one Fake Provider script consumable through distinct
+per-attempt operation IDs; and implemented validated Budget, Run Request/Event,
+Agent Context/State/Result/Error and inspection contracts plus pure full-history
+projection, immutable Provider Request construction, deterministic bounded
+operation IDs, one synchronous Provider turn with ordered Run Events, pure
+whole-batch FunctionCall admission with call/output budget preflight, and
+source-ordered sequential Tool execution with terminal ambiguity handling, and
+immutable full-history Tool-result continuation through final text, with checked
+aggregate budget and monotonic deadline enforcement, bounded exact-request
+Provider retries, interruption safety, persistent cancellation policy, and
+deterministic, temporary Real Workspace, and opt-in live Tokamak acceptance. The
+implementation gates are recorded in
+[`docs/plan/PLAN-AGENT-LOOP.md`](docs/plan/PLAN-AGENT-LOOP.md); maintenance guidance
+is in [`docs/learning/AGENT-LOOP.md`](docs/learning/AGENT-LOOP.md).
 
 The step-by-step plan for the first functional model-tool-loop MVP is [`docs/plan/PLAN.md`](docs/plan/PLAN.md).
 
 ## Design Decisions
 
-The initial product decisions are:
+The long-term product decisions are listed below. The current MVP deliberately uses
+one synchronous Agent function intended for a temporary Runtime-supervised Task;
+the persistent daemon and disposable clients remain later components.
 
 - Run Synapse as a persistent local BEAM daemon.
 - Treat CLI and TUI applications as disposable clients of that daemon.

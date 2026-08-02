@@ -48,11 +48,10 @@ defmodule Synapse.Provider.Tokamak do
   followed, preventing authorization from reaching another origin. See
   `docs/PROVIDERS.md` for the researched Tokamak proxy behavior and limitations.
 
-  The proxy currently labels streamed Responses bytes as
-  `text/plain; charset=utf-8` despite sending valid SSE framing. This transport
-  accepts that endpoint-specific compatibility type in addition to
-  `text/event-stream`, but still requires complete SSE and a terminal Responses
-  event before returning success.
+  The proxy may label valid streamed Responses bytes as `text/plain` or another
+  compatibility content type. A 2xx response succeeds only after the bounded SSE
+  decoder and Responses reducer observe complete framing and a terminal Responses
+  event; a content-type label alone can never make a body successful.
   """
 
   @behaviour Synapse.Provider
@@ -575,6 +574,14 @@ defmodule Synapse.Provider.Tokamak do
   defp finish_request({:error, exception}, state, context, _credential) do
     {:error, classify_transport_exception(exception, state, context)}
   end
+
+  defp finish_success(
+         response,
+         %{responses: %{terminal_seen: true}} = state,
+         context,
+         credential
+       ),
+       do: finish_success_stream(response, state, context, credential)
 
   defp finish_success(response, state, context, credential) do
     if event_stream_content_type?(response) do

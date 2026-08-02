@@ -566,7 +566,7 @@ so a direct read receives `workspace_busy`. An unknown lease is also rejected
 while any read permit remains active.
 
 Admission is grant-or-busy. MutationServer retains no application waiter queue;
-normal multi-call sequencing belongs to the future Agent Loop, while Tool Executor
+normal multi-call sequencing belongs to the Agent Loop, while Tool Executor
 handles exactly one admitted call. Concurrent direct callers
 receive an immediate conflict. The GenServer mailbox can still be flooded by
 arbitrary code in the same BEAM node, which is outside the in-VM threat model.

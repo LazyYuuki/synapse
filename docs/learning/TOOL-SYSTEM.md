@@ -739,8 +739,8 @@ did not truncate raw output. Neither layer logs event payloads.
 
 ## Provider-To-Tool Integration
 
-Phase 9 joins existing contracts in a deterministic test harness; it does not add
-an Agent Loop module. A successful sequence is:
+The Agent Loop now joins these contracts through public Runner integration. A
+successful sequence is:
 
 ```text
 Provider stream
@@ -804,10 +804,10 @@ flow is the first test in `test/tool_integration_test.exs`:
 # request, Context, and source order without touching a host file.
 ```
 
-The ambiguity stop is explicit test-harness policy, not a hidden queue or claimed
-Agent Loop. The future Agent Loop must still own durable conversation state,
-per-call trusted Context and operation IDs, turn sequencing, user-visible events,
-retry policy, interruption, and admission of later calls after any terminal class.
+The ambiguity stop is implemented Agent policy, not a hidden Executor queue.
+Runner owns in-memory conversation state, per-call trusted Context and operation
+IDs, turn sequencing, Run Events, retry, interruption, and later-call admission.
+Durable conversation and active-operation supervision remain deferred.
 
 The opt-in `live_tool_schema_test.exs` sends all four exact Registry schemas to the
 Tokamak Codex pool and asks for one harmless Read call. It verifies successful
@@ -1026,8 +1026,9 @@ mix docs
 33. Provider item ID remains on the Agent-owned assistant call. Function call ID
     pairs Tool Call, Result, and function output. Agent or Runtime independently
     supplies a bounded Workspace operation ID through Context.
-34. Durable conversation and attempt state, Context creation, event emission,
-    turn lifecycle, interruption, retry, and policy after terminal Tool outcomes.
+34. Agent owns in-memory conversation and attempt state, Context creation, event
+    emission, turn lifecycle, interruption, retry, and terminal Tool policy.
+    Runtime and persistence still own durable state and process supervision.
 35. It proves remote wire compatibility and bounded call construction only. The
     call is not executed; Workspace authority, path, mutation, and process safety
     require deterministic Fake and supported-platform Real tests.
@@ -1048,6 +1049,6 @@ mix docs
 
 ## Completion
 
-Tool System Phases 0-10 are complete. The next project step is the Agent Loop,
-which must reuse these one-call contracts rather than moving sequencing, durable
-state, or policy into Executor or adapters.
+Tool System Phases 0-10 and Agent Loop Phases 0-10 are complete. Runtime is the
+next MVP component and must supervise Runner without moving sequencing or semantic
+policy into Executor or adapters.

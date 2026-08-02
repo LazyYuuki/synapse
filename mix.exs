@@ -49,6 +49,7 @@ defmodule Synapse.MixProject do
         "docs/learning/PROVIDER.md",
         "docs/learning/WORKSPACE.md",
         "docs/learning/TOOL-SYSTEM.md",
+        "docs/learning/AGENT-LOOP.md",
         "docs/CLAUDE-HARNESS.md"
       ],
       groups_for_extras: [
@@ -64,11 +65,35 @@ defmodule Synapse.MixProject do
           "docs/learning/MIX.md",
           "docs/learning/PROVIDER.md",
           "docs/learning/WORKSPACE.md",
-          "docs/learning/TOOL-SYSTEM.md"
+          "docs/learning/TOOL-SYSTEM.md",
+          "docs/learning/AGENT-LOOP.md"
         ],
         Research: ["docs/CLAUDE-HARNESS.md"]
       ],
       groups_for_modules: [
+        "Run And Agent Contracts": [
+          Synapse.Budget,
+          Synapse.Run.Request,
+          Synapse.Run.Event,
+          Synapse.Run.Event.RunStarted,
+          Synapse.Run.Event.TurnStarted,
+          Synapse.Run.Event.TextDelta,
+          Synapse.Run.Event.ToolStarted,
+          Synapse.Run.Event.ToolCompleted,
+          Synapse.Run.Event.TurnCompleted,
+          Synapse.Run.Event.RunCompleted,
+          Synapse.Run.Event.RunFailed,
+          Synapse.Run.Event.RunInterrupted,
+          Synapse.Agent,
+          Synapse.Agent.Context,
+          Synapse.Agent.State,
+          Synapse.Agent.Result,
+          Synapse.Agent.Error,
+          Synapse.Agent.OperationId,
+          Synapse.Agent.Admission,
+          Synapse.Agent.Runner,
+          Synapse.Agent.Projection
+        ],
         "Tool Contracts": [
           Synapse.Tool,
           Synapse.Tool.Call,

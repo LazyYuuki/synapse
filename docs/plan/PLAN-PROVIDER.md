@@ -809,6 +809,7 @@ The exact representation may use structs, but scripts must remain readable in Ag
 - [x] Support interruption after output.
 - [x] Support malformed or incomplete event sequences for defensive tests.
 - [x] Support cancellation during scripted execution.
+- [x] Support one bounded script owner through distinct per-attempt operation IDs.
 - [x] Avoid sleeping in ordinary tests.
 
 ### Tests
@@ -817,6 +818,7 @@ The exact representation may use structs, but scripts must remain readable in Ag
 - [x] Deterministic event order.
 - [x] Expected request assertion.
 - [x] Multi-turn script consumption.
+- [x] Multi-turn script consumption through distinct operation IDs.
 - [x] Exhausted script error.
 - [x] Cancellation.
 
@@ -825,6 +827,7 @@ The exact representation may use structs, but scripts must remain readable in Ag
 - [x] Explain why Fake belongs inside the Provider component.
 - [x] Document script syntax with a text example and a tool-call example.
 - [x] Explain which failure cases Fake is intended to reproduce.
+- [x] Explain bounded operation-ID aliases and their owner-linked lifetime.
 - [x] Ensure examples are readable enough to serve as Agent Loop specifications.
 
 ### Learning Gate

@@ -612,6 +612,11 @@ Synapse.Agent
 |-- Synapse.Agent.Runner
 |-- Synapse.Agent.State
 |-- Synapse.Agent.Context
+|-- Synapse.Agent.Result
+|-- Synapse.Agent.Error
+|-- Synapse.Agent.Projection
+|-- Synapse.Agent.Admission
+|-- Synapse.Agent.OperationId
 `-- Synapse.Budget
 ```
 
@@ -687,8 +692,7 @@ build immutable turn request
 - Maximum turns.
 - Maximum total tool calls.
 - Maximum wall time.
-- Maximum provider output.
-- Maximum tool output.
+- Maximum aggregate model-visible Provider and Tool Result output.
 - Maximum safe provider retries before any output.
 
 Budget exhaustion is a structured terminal state, not an exception or an invitation to loop again.
@@ -1016,7 +1020,7 @@ The implementation order follows the dependency graph rather than feature breadt
 - [x] Pin Elixir and OTP versions.
 - [x] Add Req and ExDoc.
 - [x] Define Provider Event, Tool Call, and Tool Result.
-- [ ] Define Run Request, Run Event, and Budget.
+- [x] Define Run Request, Run Event, and Budget.
 - [x] Configure formatting, tests, ExDoc, and warnings-as-errors.
 
 Proof: the application starts, contracts compile, tests and docs pass.
@@ -1071,12 +1075,17 @@ Proof: every tool runs through Fake calls and delegates only to Workspace.
 
 Detailed phase gates: [`PLAN-AGENT-LOOP.md`](PLAN-AGENT-LOOP.md).
 
-- [ ] Implement State and Context.
-- [ ] Implement one model turn.
-- [ ] Implement sequential tool execution.
-- [ ] Implement tool-result continuation.
-- [ ] Implement loop termination and budgets.
-- [ ] Implement provider retry and interruption rules.
+- [x] Complete Agent Loop Phase 0 decisions and distinct Fake Provider attempt IDs.
+- [x] Implement Run and Agent contracts, State, Context, and Runner boundary.
+- [x] Implement full-history projection and immutable Provider turn requests.
+- [x] Implement one text-only model turn.
+- [x] Implement whole-batch function-call admission and output preflight.
+- [x] Implement sequential tool execution.
+- [x] Implement tool-result continuation.
+- [x] Implement loop termination and budgets.
+- [x] Implement provider retry and interruption rules.
+- [x] Prove deterministic and opt-in live Agent Loop acceptance.
+- [x] Complete Agent Loop reliability, security, and ExDoc comprehension review.
 
 Proof: Fake provider completes `read -> write -> bash -> final text` deterministically.
 
@@ -1096,7 +1105,7 @@ Proof: cancellation, timeout, and worker-crash tests leave no owned operation ru
 - [ ] Implement terminal renderer.
 - [ ] Implement exit-code mapping.
 - [ ] Add deterministic fixture project.
-- [ ] Add opt-in live Tokamak acceptance test.
+- [x] Add opt-in live Tokamak acceptance test.
 - [ ] Complete ExDoc architecture and lifecycle guides.
 
 Proof: the defining MVP command completes against Tokamak and all local verification passes.

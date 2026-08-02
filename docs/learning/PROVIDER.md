@@ -679,12 +679,26 @@ The expected request is optional. Turns are consumed once in order.
 
 ### Script ownership
 
-An Elixir `Agent` process stores the remaining turns and is registered by
-`operation_id`. This allows the component under test to call Fake from another
-process while sharing the same script.
+An Elixir `Agent` process stores the remaining turns. `with_script/3` accepts one
+operation ID for compatibility or a declared list of distinct Provider-attempt
+IDs. Small globally registered alias processes resolve every declared ID to the
+same script owner. This lets each attempt preserve its production operation
+identity while one script is consumed in source order from another process:
 
-`with_script/3` starts the owner, runs the test callback, and stops the owner in
-an `after` block.
+```elixir
+Fake.with_script(["provider-turn-1", "provider-turn-2"], script, fn ->
+  Fake.stream(first_request, sink, first_context)
+  Fake.stream(second_request, sink, second_context)
+end)
+```
+
+`first_context` and `second_context` carry their matching distinct IDs. The list
+is bounded to 128 unique IDs of at most 512 bytes each. The aliases monitor the
+script owner and terminate when it stops. `with_script/3` starts the owner, runs
+the test callback, and stops the owner in an `after` block.
+
+This is test configuration only. No script key, Provider module, or operation-ID
+list enters normalized `Provider.Request` or Tokamak input.
 
 ### Failures Fake can reproduce
 
@@ -802,7 +816,8 @@ The suite checks:
 
 The synthetic function is not executed. This is a Provider test, and Provider's
 job ends after returning a validated complete call. The Tool System can execute an
-Agent-admitted call; the future Agent Loop will decide whether and when to admit it.
+Agent-admitted call; the implemented Agent Loop owns whole-batch admission and
+sequential execution. See [`AGENT-LOOP.md`](AGENT-LOOP.md).
 
 ### Fixture policy
 

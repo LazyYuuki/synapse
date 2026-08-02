@@ -8,10 +8,12 @@ defmodule Synapse.Provider.Fake do
   supply credentials. Those are transport contract concerns already tested by
   `Synapse.Provider.Tokamak`; Fake tests how another component uses a Provider.
 
-  Each script is owned by a small Agent registered under its operation ID. A
-  caller may run the component under test in another process while both resolve
-  the same script through `StreamContext.operation_id`. `with_script/3` scopes
-  that process to one test and always stops it afterward.
+  Each script is owned by a small Agent registered under one or more declared
+  operation IDs. A caller may run the component under test in another process
+  while both resolve the same script through `StreamContext.operation_id`.
+  Declaring multiple IDs lets each Provider attempt retain a distinct production
+  identity while consuming one ordered test script. `with_script/3` scopes that
+  process to one test and always stops it afterward.
 
   ## Script syntax
 
@@ -25,7 +27,21 @@ defmodule Synapse.Provider.Fake do
       {:turn, expected_request, [event, ...], {:ok, response}}
 
   Turns are consumed once in source order. Events are synchronously emitted in
-  source order before the scripted terminal result is returned.
+  source order before the scripted terminal result is returned. A script may be
+  declared under one ID for compatibility or under up to 128 unique IDs of at
+  most 512 bytes each:
+
+      operation_ids = ["provider-turn-1", "provider-turn-2"]
+
+      Fake.with_script(operation_ids, script, fn ->
+        Fake.stream(first_request, sink, first_context)
+        Fake.stream(second_request, sink, second_context)
+      end)
+
+  The contexts carry the two distinct declared IDs. Small registered alias
+  processes resolve both IDs to one script owner and terminate when that owner
+  stops. Operation IDs select the script owner; call order still consumes turns
+  in script source order.
 
   ## Text example
 
@@ -123,6 +139,10 @@ defmodule Synapse.Provider.Fake do
     ToolCallStarted
   ]
 
+  @max_operation_ids 128
+  @max_operation_id_bytes 512
+  @alias_lookup_timeout_ms 1_000
+
   @typedoc "A successful or failed terminal result for one scripted turn."
   @type result :: {:ok, Response.t()} | {:error, Error.t()}
 
@@ -134,23 +154,31 @@ defmodule Synapse.Provider.Fake do
   @typedoc "An ordered sequence consumed one turn per `stream/3` call."
   @type script :: [turn()]
 
-  @doc "Starts a script owner registered under a non-empty operation ID."
-  @spec start_link(String.t(), script()) :: Agent.on_start()
-  def start_link(operation_id, script) do
-    validate_operation_id!(operation_id)
+  @typedoc "One operation ID or a non-empty unique list sharing one script owner."
+  @type operation_ids :: String.t() | [String.t(), ...]
+
+  @doc "Starts a script owner registered under one or more operation IDs."
+  @spec start_link(operation_ids(), script()) :: Agent.on_start()
+  def start_link(operation_ids, script) do
+    operation_ids = validate_operation_ids!(operation_ids)
     validate_script!(script)
-    Agent.start_link(fn -> script end, name: registry_name(operation_id))
+
+    case Agent.start_link(fn -> script end) do
+      {:ok, owner} -> register_owner(owner, operation_ids)
+      {:error, _reason} = error -> error
+    end
   end
 
   @doc """
-  Runs a function while a script is available under `operation_id`.
+  Runs a function while a script is available under one or more operation IDs.
 
   The callback may spawn another process; that process can call `stream/3` with a
-  context carrying the same operation ID.
+  context carrying any declared operation ID. All declared IDs resolve to the
+  same ordered script owner.
   """
-  @spec with_script(String.t(), script(), (-> result)) :: result when result: term()
-  def with_script(operation_id, script, callback) when is_function(callback, 0) do
-    {:ok, owner} = start_link(operation_id, script)
+  @spec with_script(operation_ids(), script(), (-> result)) :: result when result: term()
+  def with_script(operation_ids, script, callback) when is_function(callback, 0) do
+    {:ok, owner} = start_link(operation_ids, script)
 
     try do
       callback.()
@@ -291,13 +319,97 @@ defmodule Synapse.Provider.Fake do
     do: System.monotonic_time(:millisecond) >= deadline
 
   defp lookup(operation_id) do
-    case :global.whereis_name({__MODULE__, operation_id}) do
+    case :global.whereis_name(registry_key(operation_id)) do
       :undefined -> :error
-      owner when is_pid(owner) -> {:ok, owner}
+      alias_pid when is_pid(alias_pid) -> resolve_owner(alias_pid)
     end
   end
 
-  defp registry_name(operation_id), do: {:global, {__MODULE__, operation_id}}
+  defp register_owner(owner, operation_ids) do
+    case Enum.reduce_while(operation_ids, :ok, fn operation_id, :ok ->
+           case start_alias(owner, operation_id) do
+             {:ok, _alias_pid} -> {:cont, :ok}
+             {:error, reason} -> {:halt, {:error, reason}}
+           end
+         end) do
+      :ok ->
+        {:ok, owner}
+
+      {:error, reason} ->
+        Agent.stop(owner)
+        {:error, reason}
+    end
+  end
+
+  defp start_alias(owner, operation_id) do
+    caller = self()
+    registration_ref = make_ref()
+
+    alias_pid =
+      spawn_link(fn ->
+        monitor_ref = Process.monitor(owner)
+        registered = :global.register_name(registry_key(operation_id), self())
+        send(caller, {registration_ref, registered, self()})
+        alias_loop(owner, monitor_ref)
+      end)
+
+    receive do
+      {^registration_ref, :yes, ^alias_pid} ->
+        {:ok, alias_pid}
+
+      {^registration_ref, :no, ^alias_pid} ->
+        send(alias_pid, :stop)
+        {:error, already_started(operation_id)}
+    end
+  end
+
+  defp alias_loop(owner, monitor_ref) do
+    receive do
+      {:resolve_owner, caller, lookup_ref} when is_pid(caller) ->
+        send(caller, {lookup_ref, owner})
+        alias_loop(owner, monitor_ref)
+
+      {:DOWN, ^monitor_ref, :process, ^owner, _reason} ->
+        :ok
+
+      :stop ->
+        :ok
+    end
+  end
+
+  defp resolve_owner(alias_pid) do
+    lookup_ref = make_ref()
+    monitor_ref = Process.monitor(alias_pid)
+    send(alias_pid, {:resolve_owner, self(), lookup_ref})
+
+    receive do
+      {^lookup_ref, owner} when is_pid(owner) ->
+        Process.demonitor(monitor_ref, [:flush])
+        if Process.alive?(owner), do: {:ok, owner}, else: :error
+
+      {:DOWN, ^monitor_ref, :process, ^alias_pid, _reason} ->
+        :error
+    after
+      @alias_lookup_timeout_ms ->
+        Process.demonitor(monitor_ref, [:flush])
+        :error
+    end
+  end
+
+  defp already_started(operation_id) do
+    case :global.whereis_name(registry_key(operation_id)) do
+      existing_alias when is_pid(existing_alias) ->
+        case resolve_owner(existing_alias) do
+          {:ok, existing_owner} -> {:already_started, existing_owner}
+          :error -> :already_registered
+        end
+
+      :undefined ->
+        :already_registered
+    end
+  end
+
+  defp registry_key(operation_id), do: {__MODULE__, operation_id}
 
   defp validate_script!(script) when is_list(script) do
     if Enum.all?(script, &valid_turn?/1),
@@ -324,10 +436,32 @@ defmodule Synapse.Provider.Fake do
   defp valid_result?({:error, %Error{}}), do: true
   defp valid_result?(_result), do: false
 
+  defp validate_operation_ids!(operation_id) when is_binary(operation_id) do
+    validate_operation_id!(operation_id)
+    [operation_id]
+  end
+
+  defp validate_operation_ids!(operation_ids) when is_list(operation_ids) do
+    unless operation_ids != [] and length(operation_ids) <= @max_operation_ids and
+             Enum.uniq(operation_ids) == operation_ids do
+      raise ArgumentError,
+            "operation_ids must be a non-empty unique list of at most #{@max_operation_ids} IDs"
+    end
+
+    Enum.each(operation_ids, &validate_operation_id!/1)
+    operation_ids
+  end
+
+  defp validate_operation_ids!(_operation_ids) do
+    raise ArgumentError, "operation_ids must be one ID or a non-empty unique list"
+  end
+
   defp validate_operation_id!(operation_id) do
     unless is_binary(operation_id) and String.valid?(operation_id) and
-             String.trim(operation_id) != "" do
-      raise ArgumentError, "operation_id must be a non-empty UTF-8 string"
+             String.trim(operation_id) != "" and
+             byte_size(operation_id) <= @max_operation_id_bytes do
+      raise ArgumentError,
+            "operation_id must be a non-empty UTF-8 string of at most #{@max_operation_id_bytes} bytes"
     end
   end
 
