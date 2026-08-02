@@ -288,11 +288,12 @@ references, exceptions, environments, or credentials.
 }
 ```
 
-Context is trusted per-operation data assembled by Agent or Runtime. The model
-cannot provide or alter it. Executor derives the exact Workspace OperationContext
-access for the selected Tool and retains it with the authenticated Handle in an
-internal DispatchContext. Tool callbacks receive neither value; a Tool Context
-never raises the Workspace handle's access ceiling.
+Context is trusted per-operation data assembled by Agent from Runtime-owned
+authority and lifetime policy, or directly by a deterministic test harness. The
+model cannot provide or alter it. Executor derives the exact Workspace
+OperationContext access for the selected Tool and retains it with the
+authenticated Handle in an internal DispatchContext. Tool callbacks receive
+neither value; a Tool Context never raises the Workspace handle's access ceiling.
 
 ### Capability Set
 

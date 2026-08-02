@@ -116,7 +116,9 @@ Tokamak implementation
 
 No Provider module imports or calls Agent, Tool, Workspace, CLI, or Runtime.
 
-Runtime may pass an operation context containing cancellation and deadline information into Provider. Provider consumes that context but does not call Runtime.
+Agent constructs one Provider StreamContext per attempt from Runtime-owned
+cancellation and deadline policy. Provider consumes that context but does not call
+Runtime.
 
 ## Provider Boundary
 
@@ -175,7 +177,7 @@ Runtime may pass an operation context containing cancellation and deadline infor
 | `Synapse.Provider.Error` | Sanitized provider failure classification |
 | `Synapse.Provider.Event` | Typed event definitions |
 | `Synapse.Provider.OutputItem` | Normalized message and function-call output items |
-| `Synapse.Provider.StreamContext` | Cancellation, deadline, and activity context supplied by Runtime |
+| `Synapse.Provider.StreamContext` | Per-attempt cancellation, deadline, and activity context constructed by Agent from Runtime-owned policy |
 | `Synapse.Provider.SSEDecoder` | Incremental byte-to-SSE-frame parser |
 | `Synapse.Provider.SSEEvent` | Protocol-neutral SSE frame |
 | `Synapse.Provider.ResponsesCodec` | Normalized request-to-Responses JSON encoding |

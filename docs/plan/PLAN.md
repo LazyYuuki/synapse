@@ -118,7 +118,7 @@ Raw Tokamak JSON must not cross the Provider boundary. Raw model tool arguments 
 | Workspace | Own safe access to files and local processes inside one project root | OTP, MuonTrap, shared contracts |
 | Tool System | Expose model-facing tool schemas and dispatch validated calls | Workspace, shared contracts |
 | Agent Loop | Own conversation state and coordinate model-tool turns | Provider, Tool System, shared contracts |
-| Runtime | Supervise runs and operations; enforce cancellation and time limits | Agent Loop, Workspace, OTP, shared contracts |
+| Runtime | Supervise run lifetime; own Workspace lifecycle and cancellation; wire time-limit policy | Agent Loop, Workspace, OTP, shared contracts |
 | CLI and Renderer | Convert local user input into a run and run events into terminal output | Runtime, shared contracts |
 
 ## Shared Contracts
@@ -723,18 +723,23 @@ Use only the Fake provider for deterministic loop tests:
 
 ## 5. Runtime
 
+Detailed implementation checklist: [`PLAN-RUNTIME.md`](PLAN-RUNTIME.md).
+
 ### Purpose
 
-The Runtime hosts the Agent Loop inside OTP. It owns supervised process lifetime, cancellation, operation timeout, and the minimal services shared by Provider and Workspace.
+The Runtime hosts the Agent Loop inside OTP. It owns the outer supervised run
+lifetime, Workspace open/close, persistent cancellation, terminal cleanup, and
+the trusted time-limit policy passed through Agent to Provider and Workspace.
 
 ### Supervision Tree
 
 ```text
 Synapse.Application
 `-- Synapse.Supervisor
-    |-- Synapse.TaskSupervisor
-    `-- Synapse.Workspace.Supervisor
-        `-- Synapse.Workspace.MutationServer [temporary per opened handle]
+    |-- Synapse.Workspace.Supervisor
+    |   `-- Synapse.Workspace.MutationServer [temporary per opened handle]
+    `-- Synapse.TaskSupervisor
+        `-- Runtime run Task [temporary per accepted run]
 ```
 
 The tree should stay this small until a real ownership requirement appears.
@@ -743,10 +748,13 @@ The tree should stay this small until a real ownership requirement appears.
 
 - Start the application supervision tree.
 - Start one supervised run Task.
-- Start supervised provider and process operations where required.
-- Monitor owned Tasks and ports.
-- Propagate cancellation.
-- Enforce operation inactivity and absolute deadlines.
+- Open and close one Workspace owned by the run Task.
+- Monitor the owned run Task while Provider and Workspace retain their private
+  workers, ports, watchdogs, and cleanup.
+- Propagate persistent cancellation through existing Agent contexts.
+- Pass one effective absolute deadline and configured inactivity policy to the
+  lower operation owners without creating competing timers.
+- Publish the terminal Run Event only after Workspace cleanup.
 - Convert unexpected worker exits into structured Run Events.
 - Ensure temporary workers are not automatically restarted after side effects.
 
@@ -758,25 +766,28 @@ The tree should stay this small until a real ownership requirement appears.
 - Render user-facing text.
 - Persist sessions in the MVP.
 
-### Operation Lifecycle
+### Run Lifecycle
 
 ```text
-operation_started
-  -> activity events update last_activity_at
-  -> operation_completed
-  -> operation_failed
-  -> operation_timed_out
-  -> operation_cancelled
+start_run
+  -> open Workspace under temporary run Task ownership
+  -> execute synchronous Agent Runner
+  -> close Workspace
+  -> publish one terminal Run Event
+  -> await returns Agent Result or Agent Error
 ```
 
-Provider inactivity starts near two minutes. Tool inactivity starts near three minutes. Exact values remain configuration and must be documented.
+Provider inactivity starts near two minutes and Tool inactivity starts near three
+minutes. Provider and Workspace enforce those operation-specific timers from the
+contexts Agent constructs. Runtime owns the outer Task, cancellation state, and
+cleanup gate rather than duplicating lower watchdogs.
 
 ### Retry Rules
 
 Agent applies semantic Provider retry policy from
-[`PLAN-AGENT-LOOP.md`](PLAN-AGENT-LOOP.md). Runtime owns supervised attempt
-lifetime, cancellation, and deadline enforcement; it must preserve these replay
-constraints rather than independently retrying a request.
+[`PLAN-AGENT-LOOP.md`](PLAN-AGENT-LOOP.md). Runtime owns the supervised outer run
+lifetime, cancellation source, and earlier deadline policy; it must preserve
+these replay constraints rather than independently retrying Runner or a request.
 
 - Connect, TLS, 429, and retryable 5xx failures may retry only before provider output.
 - The MVP allows at most two safe provider retries.
@@ -1001,7 +1012,8 @@ lib/
 
   synapse/runtime/
     runtime.ex
-    operation.ex
+    run.ex
+    error.ex
 
   synapse/cli/
     options.ex
@@ -1091,9 +1103,12 @@ Proof: Fake provider completes `read -> write -> bash -> final text` determinist
 
 ### Step 5: Runtime
 
+Detailed phase gates: [`PLAN-RUNTIME.md`](PLAN-RUNTIME.md).
+
 - [ ] Run Agent Loop under TaskSupervisor.
-- [ ] Add operation lifecycle and monitoring.
-- [ ] Add inactivity and absolute deadlines.
+- [ ] Supervise temporary Workspace owners and run Tasks without restart.
+- [ ] Add start, await, terminal cleanup, and task monitoring.
+- [ ] Wire lower inactivity and absolute deadline policy.
 - [ ] Add cancellation propagation.
 - [ ] Convert worker exits to Run Events.
 

@@ -104,7 +104,10 @@ Workspace
   -X-> CLI
 ```
 
-Runtime may later create an operation context containing authority, cancellation, deadline, and activity information. Workspace consumes that context without importing Runtime, following the dependency-inverted pattern established by `Synapse.Provider.StreamContext`.
+Tool Context currently derives each Workspace OperationContext from Agent-carried
+Runtime authority, cancellation, deadline, and activity policy. Workspace consumes
+that context without importing Runtime, following the dependency-inverted pattern
+established by `Synapse.Provider.StreamContext`.
 
 ## Workspace Boundary
 
@@ -294,8 +297,8 @@ The opening owner is monitored. `close/1` is idempotent after confirmed backend
 death. A live close authenticates the exact token, limits, and Access retained by
 the backend, so an altered same-token Handle cannot close the original. Owner death
 closes the workspace, releases mutation ownership, and cancels an active process
-operation. Runtime may later supervise the same lifecycle without changing
-operation contracts.
+operation. Runtime owns the opening task and Handle lifecycle while Workspace
+retains its operation workers, monitors, timeouts, and cleanup contracts.
 
 ### Limits
 
