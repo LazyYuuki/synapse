@@ -97,7 +97,8 @@ Raw Tokamak JSON must not cross the Provider boundary. Raw model tool arguments 
 2. Runtime starts supervised run
 3. Agent Loop creates Provider Request
 4. Provider streams normalized events
-5. Agent Loop collects final text and complete tool calls
+5. Agent Loop treats the successful terminal Provider Response as the authority
+   for final text, complete tool calls, and source order
 6. Agent preflights every call; one-call Executor validates one admitted Call
 7. Built-in Tool prepares one typed Workspace request without a Handle
 8. Static Dispatcher calls the exact Workspace operation under reduced Access
@@ -196,7 +197,8 @@ progress events.
   max_wall_time_ms: 900_000,
   provider_inactivity_ms: 120_000,
   tool_inactivity_ms: 180_000,
-  max_output_bytes: 64_000
+  max_output_bytes: 64_000,
+  max_provider_retries: 2
 }
 ```
 
@@ -595,6 +597,8 @@ returns: exit code, output, elapsed time, and truncation on known completion; fo
 
 ## 4. Agent Loop
 
+Detailed implementation checklist: [`PLAN-AGENT-LOOP.md`](PLAN-AGENT-LOOP.md).
+
 ### Purpose
 
 The Agent Loop is the central orchestrator. It owns the in-memory conversation and decides when to call the Provider, when to execute complete tool calls, and when the run is finished.
@@ -608,7 +612,7 @@ Synapse.Agent
 |-- Synapse.Agent.Runner
 |-- Synapse.Agent.State
 |-- Synapse.Agent.Context
-`-- Synapse.Agent.Budget
+`-- Synapse.Budget
 ```
 
 For the MVP, one supervised Task can execute the loop. A dedicated GenServer is not required until Synapse needs a persistent daemon, reconnectable clients, or concurrent run control.
@@ -643,7 +647,10 @@ For the MVP, one supervised Task can execute the loop. A dedicated GenServer is 
   input_items: input_items,
   turn: 0,
   tool_calls: 0,
+  provider_retries: 0,
+  output_bytes: 0,
   started_at: started_at,
+  deadline: deadline,
   status: :running
 }
 ```
@@ -761,6 +768,11 @@ operation_started
 Provider inactivity starts near two minutes. Tool inactivity starts near three minutes. Exact values remain configuration and must be documented.
 
 ### Retry Rules
+
+Agent applies semantic Provider retry policy from
+[`PLAN-AGENT-LOOP.md`](PLAN-AGENT-LOOP.md). Runtime owns supervised attempt
+lifetime, cancellation, and deadline enforcement; it must preserve these replay
+constraints rather than independently retrying a request.
 
 - Connect, TLS, 429, and retryable 5xx failures may retry only before provider output.
 - The MVP allows at most two safe provider retries.
@@ -1056,6 +1068,8 @@ Detailed phase gates: [`PLAN-TOOL-SYSTEM.md`](PLAN-TOOL-SYSTEM.md).
 Proof: every tool runs through Fake calls and delegates only to Workspace.
 
 ### Step 4: Agent Loop
+
+Detailed phase gates: [`PLAN-AGENT-LOOP.md`](PLAN-AGENT-LOOP.md).
 
 - [ ] Implement State and Context.
 - [ ] Implement one model turn.

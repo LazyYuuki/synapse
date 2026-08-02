@@ -44,6 +44,7 @@ defmodule Synapse.MixProject do
         "docs/plan/PLAN-PROVIDER.md",
         "docs/plan/PLAN-WORKSPACE.md",
         "docs/plan/PLAN-TOOL-SYSTEM.md",
+        "docs/plan/PLAN-AGENT-LOOP.md",
         "docs/learning/MIX.md",
         "docs/learning/PROVIDER.md",
         "docs/learning/WORKSPACE.md",
@@ -56,7 +57,8 @@ defmodule Synapse.MixProject do
           "docs/plan/PLAN.md",
           "docs/plan/PLAN-PROVIDER.md",
           "docs/plan/PLAN-WORKSPACE.md",
-          "docs/plan/PLAN-TOOL-SYSTEM.md"
+          "docs/plan/PLAN-TOOL-SYSTEM.md",
+          "docs/plan/PLAN-AGENT-LOOP.md"
         ],
         Learning: [
           "docs/learning/MIX.md",

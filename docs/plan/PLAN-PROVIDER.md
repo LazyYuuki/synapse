@@ -6,7 +6,7 @@ This document is the implementation checklist for the Provider component defined
 
 It turns the provider research in [`../PROVIDERS.md`](../PROVIDERS.md) and the comprehension requirements in [`../../README.md`](../../README.md) into an ordered set of coding, testing, documentation, and learning tasks.
 
-The checklist is intentionally limited to the Provider component. It does not implement the Agent Loop, Workspace, built-in tools, Runtime retry orchestration, or CLI rendering.
+The checklist is intentionally limited to the Provider component. It does not implement the Agent Loop, Workspace, built-in tools, Agent retry policy, Runtime operation supervision, or CLI rendering.
 
 ## Provider Outcome
 
@@ -301,7 +301,9 @@ interrupted
 upstream
 ```
 
-Provider classifies retryability. Agent or Runtime decides whether another attempt is permitted.
+Provider classifies retryability. Agent decides whether conversation and output
+semantics permit another attempt; Runtime later owns the attempt's supervised
+process lifetime and cancellation.
 
 ### Provider Events
 
