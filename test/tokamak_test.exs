@@ -57,7 +57,7 @@ defmodule Synapse.Provider.TokamakTest do
              %FunctionCall{
                call_id: "call-read",
                name: "read",
-               arguments: %{"path" => "mix.exs"}
+               arguments: %{"path" => "mix.exs", "offset" => nil, "limit" => nil}
              }
            ] = response.output_items
   end
@@ -234,14 +234,19 @@ defmodule Synapse.Provider.TokamakTest do
       {request, Req.Response.new(status: 200)}
     end
 
-    context = context!(inactivity_ms: 20)
+    context = context!(inactivity_ms: 500)
 
-    assert {:error, error} =
-             Tokamak.stream(request!(), fn _event -> :ok end, context, transport(adapter))
+    task =
+      Task.async(fn ->
+        Tokamak.stream(request!(), fn _event -> :ok end, context, transport(adapter))
+      end)
+
+    assert_receive {:sleeping_worker, worker}, 1_000
+
+    assert {:error, error} = Task.await(task, 2_000)
 
     assert %Error{kind: :timeout, output_started: false} = error
     assert error.message == "Provider stream became inactive"
-    assert_receive {:sleeping_worker, worker}
     refute Process.alive?(worker)
   end
 

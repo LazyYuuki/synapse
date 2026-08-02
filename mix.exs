@@ -47,6 +47,7 @@ defmodule Synapse.MixProject do
         "docs/learning/MIX.md",
         "docs/learning/PROVIDER.md",
         "docs/learning/WORKSPACE.md",
+        "docs/learning/TOOL-SYSTEM.md",
         "docs/CLAUDE-HARNESS.md"
       ],
       groups_for_extras: [
@@ -60,11 +61,33 @@ defmodule Synapse.MixProject do
         Learning: [
           "docs/learning/MIX.md",
           "docs/learning/PROVIDER.md",
-          "docs/learning/WORKSPACE.md"
+          "docs/learning/WORKSPACE.md",
+          "docs/learning/TOOL-SYSTEM.md"
         ],
         Research: ["docs/CLAUDE-HARNESS.md"]
       ],
       groups_for_modules: [
+        "Tool Contracts": [
+          Synapse.Tool,
+          Synapse.Tool.Call,
+          Synapse.Tool.Result,
+          Synapse.Tool.Spec,
+          Synapse.Tool.CapabilitySet,
+          Synapse.Tool.Context,
+          Synapse.Tool.Limits
+        ],
+        "Tool Specifications And Registry": [
+          Synapse.Tool.Registry,
+          Synapse.Tool.Read,
+          Synapse.Tool.Write,
+          Synapse.Tool.Edit,
+          Synapse.Tool.Bash
+        ],
+        "Tool Execution": [
+          Synapse.Tool.DispatchContext,
+          Synapse.Tool.Executor,
+          Synapse.Tool.Presentation
+        ],
         "Workspace Facade And Core": [
           Synapse.Workspace,
           Synapse.Workspace.Real,

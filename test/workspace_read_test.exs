@@ -358,8 +358,10 @@ defmodule Synapse.Workspace.ReadTest do
       assert {:error, %Error{reason: :invalid_handle}} =
                Workspace.read(forged_limits, read_request("file.txt"), context())
 
-      Workspace.close(denied_handle)
-      Workspace.close(lowered_handle)
+      assert {:error, %Error{reason: :invalid_handle}} = Workspace.close(forged_access)
+      assert {:error, %Error{reason: :invalid_handle}} = Workspace.close(forged_limits)
+      assert :ok = Workspace.close(denied_handle)
+      assert :ok = Workspace.close(lowered_handle)
     end)
   end
 

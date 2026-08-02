@@ -12,7 +12,8 @@ defmodule Synapse.Provider.Response do
 
   * `id` is the provider response identifier.
   * `model` is the model reported for the completed response.
-  * `output_items` contains normalized complete messages and function calls.
+  * `output_items` contains normalized complete messages and function calls with
+    unique item IDs and unique function call pairing IDs.
   * `usage` is string-keyed JSON token accounting. Provider producers sanitize
     and allowlist it; `new/1` validates JSON shape only.
   * `status` is always `:completed` for this success-only contract.
@@ -38,6 +39,8 @@ defmodule Synapse.Provider.Response do
           {:id, :must_be_non_empty_string}
           | {:model, :must_be_non_empty_string}
           | {:output_items, :must_be_complete_output_items}
+          | {:output_items, :must_have_unique_item_and_call_ids}
+          | {:status, :must_be_completed}
           | {:usage, :must_be_string_keyed_json_object}
 
   @doc """
@@ -53,6 +56,7 @@ defmodule Synapse.Provider.Response do
     model = Map.get(attrs, :model)
     output_items = Map.get(attrs, :output_items, [])
     usage = Map.get(attrs, :usage, %{})
+    status = Map.get(attrs, :status, :completed)
 
     cond do
       not non_empty_string?(id) ->
@@ -63,6 +67,12 @@ defmodule Synapse.Provider.Response do
 
       not (is_list(output_items) and Enum.all?(output_items, &complete_output_item?/1)) ->
         {:error, {:output_items, :must_be_complete_output_items}}
+
+      not unique_output_items?(output_items) ->
+        {:error, {:output_items, :must_have_unique_item_and_call_ids}}
+
+      status != :completed ->
+        {:error, {:status, :must_be_completed}}
 
       not JSON.object?(usage) ->
         {:error, {:usage, :must_be_string_keyed_json_object}}
@@ -98,6 +108,18 @@ defmodule Synapse.Provider.Response do
            JSON.object?(arguments)
 
   defp complete_output_item?(_item), do: false
+
+  defp unique_output_items?(items) do
+    item_ids = Enum.map(items, & &1.id)
+
+    call_ids =
+      Enum.flat_map(items, fn
+        %FunctionCall{call_id: call_id} -> [call_id]
+        %Message{} -> []
+      end)
+
+    Enum.uniq(item_ids) == item_ids and Enum.uniq(call_ids) == call_ids
+  end
 
   defp non_empty_string?(value), do: is_binary(value) and String.trim(value) != ""
 end

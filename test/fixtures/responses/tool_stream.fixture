@@ -29,13 +29,13 @@
     "type" => "response.function_call_arguments.delta",
     "item_id" => "item-read",
     "output_index" => 0,
-    "delta" => ":\"mix.exs\"}"
+    "delta" => ":\"mix.exs\",\"offset\":null,\"limit\":null}"
   },
   %{
     "type" => "response.function_call_arguments.done",
     "item_id" => "item-read",
     "output_index" => 0,
-    "arguments" => "{\"path\":\"mix.exs\"}"
+    "arguments" => "{\"path\":\"mix.exs\",\"offset\":null,\"limit\":null}"
   },
   %{
     "type" => "response.completed",
@@ -50,7 +50,7 @@
           "status" => "completed",
           "call_id" => "call-read",
           "name" => "read",
-          "arguments" => "{\"path\":\"mix.exs\"}"
+          "arguments" => "{\"path\":\"mix.exs\",\"offset\":null,\"limit\":null}"
         }
       ]
     }

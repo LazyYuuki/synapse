@@ -59,7 +59,7 @@ defmodule Synapse.Workspace.Real do
   @impl true
   @doc false
   def close(%Handle{} = handle) do
-    case MutationServer.close(handle.state, handle.token) do
+    case MutationServer.close(handle.state, handle.token, handle.limits, handle.access) do
       :ok -> :ok
       {:error, :invalid_handle} -> operation_error(:close, :invalid_handle, nil, nil)
     end
@@ -845,8 +845,9 @@ defmodule Synapse.Workspace.MutationServer do
 
   def valid_handle?(_owner, _token, _limits, _access), do: false
 
-  @spec close(pid() | reference(), reference()) :: :ok | {:error, :invalid_handle}
-  def close(owner, token) when is_pid(owner) do
+  @spec close(pid() | reference(), reference(), term(), term()) ::
+          :ok | {:error, :invalid_handle}
+  def close(owner, token, limits, access) when is_pid(owner) do
     case mutation_server_identity(owner) do
       :dead ->
         :ok
@@ -855,7 +856,7 @@ defmodule Synapse.Workspace.MutationServer do
         {:error, :invalid_handle}
 
       :valid ->
-        case GenServer.call(owner, {:close, token}, :infinity) do
+        case GenServer.call(owner, {:close, token, limits, access}, :infinity) do
           :closing -> await_server_close(owner)
           result -> result
         end
@@ -864,7 +865,7 @@ defmodule Synapse.Workspace.MutationServer do
     :exit, reason -> if closed_exit?(reason), do: :ok, else: {:error, :invalid_handle}
   end
 
-  def close(_owner, _token), do: {:error, :invalid_handle}
+  def close(_owner, _token, _limits, _access), do: {:error, :invalid_handle}
 
   defp await_server_close(server) do
     monitor = Process.monitor(server)
@@ -961,13 +962,17 @@ defmodule Synapse.Workspace.MutationServer do
   end
 
   @impl true
-  def handle_call({:close, token}, {closer, _tag} = from, %{token: token} = state) do
+  def handle_call(
+        {:close, token, limits, access},
+        {closer, _tag} = from,
+        %{token: token, limits: limits, access: access} = state
+      ) do
     if active_work?(state) and not caller_owns_only_idle_leases?(state, closer),
       do: request_close(from, state),
       else: {:stop, :normal, :ok, state}
   end
 
-  def handle_call({:close, _token}, _from, state),
+  def handle_call({:close, _token, _limits, _access}, _from, state),
     do: {:reply, {:error, :invalid_handle}, state}
 
   def handle_call(

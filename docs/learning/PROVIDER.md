@@ -364,7 +364,7 @@ Provider.Request -> string-keyed Responses map
 It should be testable without a URL, API key, Req process, or network. Tokamak
 transport adds endpoint and authorization policy later.
 
-### Canonical tool shape
+### Flat Responses tool shape
 
 Responses tools use flat fields:
 
@@ -801,8 +801,8 @@ The suite checks:
 - Cancellation after output with no completion or replay.
 
 The synthetic function is not executed. This is a Provider test, and Provider's
-job ends after returning a validated complete call. The future Tool System and
-Agent Loop will decide whether to execute it.
+job ends after returning a validated complete call. The Tool System can execute an
+Agent-admitted call; the future Agent Loop will decide whether and when to admit it.
 
 ### Fixture policy
 

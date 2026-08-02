@@ -11,15 +11,28 @@
     %{
       "type" => "function",
       "name" => "read",
-      "description" => "Read numbered lines from a workspace file.",
+      "description" =>
+        "Read a bounded window of numbered lines from one workspace text file. Use the returned revision for write or edit.",
       "parameters" => %{
         "type" => "object",
         "properties" => %{
-          "path" => %{"type" => "string"},
-          "offset" => %{"type" => "integer", "minimum" => 0},
-          "limit" => %{"type" => "integer", "minimum" => 1}
+          "path" => %{
+            "type" => "string",
+            "description" => "Relative workspace file path."
+          },
+          "offset" => %{
+            "type" => ["integer", "null"],
+            "minimum" => 0,
+            "description" => "Zero-based line offset, or null for 0."
+          },
+          "limit" => %{
+            "type" => ["integer", "null"],
+            "minimum" => 1,
+            "maximum" => 1_000,
+            "description" => "Maximum lines, or null for the trusted default."
+          }
         },
-        "required" => ["path"],
+        "required" => ["path", "offset", "limit"],
         "additionalProperties" => false
       },
       "strict" => true

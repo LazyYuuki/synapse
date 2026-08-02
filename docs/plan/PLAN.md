@@ -98,13 +98,15 @@ Raw Tokamak JSON must not cross the Provider boundary. Raw model tool arguments 
 3. Agent Loop creates Provider Request
 4. Provider streams normalized events
 5. Agent Loop collects final text and complete tool calls
-6. Tool Executor validates each call
-7. Built-in Tool delegates to Workspace
-8. Workspace returns bounded Tool Result
-9. Agent Loop appends paired tool output to conversation
-10. Agent Loop requests the next model turn
-11. Loop ends on final text or terminal failure
-12. CLI renders result and chooses exit status
+6. Agent preflights every call; one-call Executor validates one admitted Call
+7. Built-in Tool prepares one typed Workspace request without a Handle
+8. Static Dispatcher calls the exact Workspace operation under reduced Access
+9. Workspace returns a bounded Workspace result or error
+10. Built-in Presentation creates one paired bounded Tool Result
+11. Agent Loop appends paired tool output to conversation
+12. Agent Loop requests the next model turn
+13. Loop ends on final text or terminal failure
+14. CLI renders result and chooses exit status
 ```
 
 ## Component Summary
@@ -462,6 +464,8 @@ The Tool System is the model-facing capability layer. It tells the model which o
 Synapse.Tool
 |-- Synapse.Tool.Registry
 |-- Synapse.Tool.Executor
+|-- Synapse.Tool.Dispatcher
+|-- Synapse.Tool.Presentation
 |-- Synapse.Tool.Read
 |-- Synapse.Tool.Write
 |-- Synapse.Tool.Edit
@@ -496,15 +500,26 @@ Synapse.Tool
 ```elixir
 @callback specification() :: Synapse.Tool.Spec.t()
 
-@callback execute(
+@callback prepare(
   Synapse.Tool.Call.t(),
-  Synapse.Tool.Context.t()
+  Synapse.Tool.Limits.t()
+) :: {:ok, workspace_request()} | {:error, :invalid_arguments}
+
+@callback present(
+  Synapse.Tool.Call.t(),
+  workspace_outcome(),
+  Synapse.Tool.Limits.t()
 ) :: Synapse.Tool.Result.t()
 ```
 
 ```elixir
 Tool.Executor.execute(tool_call, tool_context)
 ```
+
+Executor retains the authenticated Workspace Handle and exact OperationContext.
+Built-in callbacks prepare typed requests and present retained outcomes without
+receiving host authority; the static Dispatcher alone selects the matching
+Workspace facade function.
 
 `call_id` is the Provider function-call pairing ID. It is distinct from the
 Provider output-item ID retained by Agent and the bounded Workspace operation ID
@@ -515,7 +530,7 @@ supplied through Tool Context.
 #### Read
 
 ```text
-arguments: path, optional offset, optional limit
+arguments: path, required nullable offset, required nullable limit
 capability: fs.read:<workspace>
 workspace operation: Workspace.read
 returns: numbered lines, revision, continuation information
@@ -544,7 +559,7 @@ The old text must match exactly once.
 #### Bash
 
 ```text
-arguments: command, optional timeout_ms
+arguments: command, required nullable timeout_ms
 capability: process.exec:<workspace>
 workspace operation: Workspace.run
 returns: exit code, output, elapsed time, and truncation on known completion; forced stop is ambiguous because Bash has unknown mutation footprint
@@ -573,7 +588,7 @@ returns: exit code, output, elapsed time, and truncation on known completion; fo
 ### Complete When
 
 - All four schemas are accepted by the Tokamak Codex pool.
-- Every tool can be exercised through the Fake provider.
+- Every tool can be exercised through Fake Workspace without host side effects.
 - Every tool delegates host access to Workspace.
 - Every valid call submitted to Executor receives a paired result.
 - LSP hover explains each tool's purpose, correct usage, side effects, and failure behavior.
@@ -884,8 +899,10 @@ The Agent never dispatches modules from arbitrary model strings.
 ### Tool System To Workspace
 
 ```text
-Tool sends: validated host operation
+Built-in prepares: typed request without Handle
+Static Dispatcher sends: exact validated Workspace operation
 Workspace returns: structured operation result
+Built-in presents: paired bounded Tool Result
 ```
 
 Tools never call `File`, `System`, or `Port` directly.
@@ -909,7 +926,11 @@ CLI Renderer consumes Run Events
 
 No core component prints directly to the terminal.
 
-## Recommended Source Layout
+## Target Source Layout
+
+This is a future-oriented component map, not the current filesystem. Implemented
+public facades currently live at `synapse/provider.ex`, `synapse/workspace.ex`, and
+`synapse/tool.ex`; Tool Call and Result live under `synapse/tool/`.
 
 ```text
 lib/
@@ -982,7 +1003,8 @@ The implementation order follows the dependency graph rather than feature breadt
 - [x] Create the supervised Mix application.
 - [x] Pin Elixir and OTP versions.
 - [x] Add Req and ExDoc.
-- [ ] Define Run Request, Run Event, Provider Event, Tool Call, Tool Result, and Budget.
+- [x] Define Provider Event, Tool Call, and Tool Result.
+- [ ] Define Run Request, Run Event, and Budget.
 - [x] Configure formatting, tests, ExDoc, and warnings-as-errors.
 
 Proof: the application starts, contracts compile, tests and docs pass.
@@ -1018,12 +1040,18 @@ documented cooperative boundary; Workspace is complete only when
 
 Detailed phase gates: [`PLAN-TOOL-SYSTEM.md`](PLAN-TOOL-SYSTEM.md).
 
-- [ ] Implement Tool behaviour, registry, and executor.
-- [ ] Implement Read schema and adapter.
-- [ ] Implement Write schema and adapter.
-- [ ] Implement Edit schema and adapter.
-- [ ] Implement Bash schema and adapter.
-- [ ] Enforce local capabilities and paired results.
+- [x] Complete Tool System Phase 0 decisions and live schema acceptance.
+- [x] Implement Tool contracts, limits, and behaviour.
+- [x] Implement canonical Tool specifications and static registry.
+- [x] Implement Tool executor and capability dispatch.
+- [x] Implement bounded deterministic result presentation and failure mapping.
+- [x] Implement Read schema and adapter.
+- [x] Implement Write schema and adapter.
+- [x] Implement Edit schema and adapter.
+- [x] Implement Bash schema and adapter.
+- [x] Enforce local capabilities and paired results.
+- [x] Complete deterministic Provider-to-Tool integration and live schema acceptance.
+- [x] Complete Tool reliability, security, ExDoc, and comprehension review.
 
 Proof: every tool runs through Fake calls and delegates only to Workspace.
 

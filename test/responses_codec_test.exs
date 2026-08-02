@@ -2,6 +2,7 @@ defmodule Synapse.Provider.ResponsesCodecTest do
   use ExUnit.Case, async: true
 
   alias Synapse.Provider.{Request, ResponsesCodec}
+  alias Synapse.Tool.Registry
 
   doctest ResponsesCodec
 
@@ -36,14 +37,43 @@ defmodule Synapse.Provider.ResponsesCodecTest do
     assert Map.has_key?(tool, "parameters")
   end
 
-  test "encodes all four future built-in function schemas in order" do
+  test "encodes the four canonical strict built-in schemas in order" do
     expected = fixture("all_tools_request")
+    tools = Registry.specifications()
 
     assert {:ok, request} =
-             Request.new(model: "configured-model", tools: expected["tools"])
+             Request.new(model: "configured-model", tools: tools)
 
     assert {:ok, ^expected} = ResponsesCodec.encode(request)
+    assert tools == expected["tools"]
     assert Enum.map(expected["tools"], & &1["name"]) == ~w(read write edit bash)
+
+    Enum.each(expected["tools"], fn tool ->
+      parameters = tool["parameters"]
+
+      assert tool["strict"]
+      assert parameters["additionalProperties"] == false
+      assert MapSet.new(parameters["required"]) == MapSet.new(Map.keys(parameters["properties"]))
+    end)
+
+    read = Enum.find(expected["tools"], &(&1["name"] == "read"))
+    bash = Enum.find(expected["tools"], &(&1["name"] == "bash"))
+
+    assert read["parameters"]["properties"]["offset"]["type"] == ["integer", "null"]
+
+    assert read["parameters"]["properties"]["limit"] == %{
+             "type" => ["integer", "null"],
+             "minimum" => 1,
+             "maximum" => 1_000,
+             "description" => "Maximum lines, or null for the trusted default."
+           }
+
+    assert bash["parameters"]["properties"]["timeout_ms"] == %{
+             "type" => ["integer", "null"],
+             "minimum" => 1,
+             "maximum" => 900_000,
+             "description" => "Lower total timeout, or null for the trusted default."
+           }
   end
 
   test "encodes function calls and matching outputs in conversation order" do
@@ -56,7 +86,7 @@ defmodule Synapse.Provider.ResponsesCodecTest do
         "id" => "item-read",
         "call_id" => "call-read",
         "name" => "read",
-        "arguments" => %{"path" => "mix.exs"}
+        "arguments" => %{"path" => "mix.exs", "offset" => nil, "limit" => nil}
       },
       Enum.at(expected["input"], 2),
       %{
@@ -64,7 +94,7 @@ defmodule Synapse.Provider.ResponsesCodecTest do
         "id" => "item-test",
         "call_id" => "call-test",
         "name" => "bash",
-        "arguments" => %{"command" => "mix test"}
+        "arguments" => %{"command" => "mix test", "timeout_ms" => nil}
       },
       Enum.at(expected["input"], 4)
     ]

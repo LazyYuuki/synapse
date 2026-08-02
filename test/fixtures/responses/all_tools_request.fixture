@@ -5,15 +5,28 @@
     %{
       "type" => "function",
       "name" => "read",
-      "description" => "Read numbered lines from a workspace file.",
+      "description" =>
+        "Read a bounded window of numbered lines from one workspace text file. Use the returned revision for write or edit.",
       "parameters" => %{
         "type" => "object",
         "properties" => %{
-          "path" => %{"type" => "string"},
-          "offset" => %{"type" => "integer", "minimum" => 0},
-          "limit" => %{"type" => "integer", "minimum" => 1}
+          "path" => %{
+            "type" => "string",
+            "description" => "Relative workspace file path."
+          },
+          "offset" => %{
+            "type" => ["integer", "null"],
+            "minimum" => 0,
+            "description" => "Zero-based line offset, or null for 0."
+          },
+          "limit" => %{
+            "type" => ["integer", "null"],
+            "minimum" => 1,
+            "maximum" => 1_000,
+            "description" => "Maximum lines, or null for the trusted default."
+          }
         },
-        "required" => ["path"],
+        "required" => ["path", "offset", "limit"],
         "additionalProperties" => false
       },
       "strict" => true
@@ -21,13 +34,24 @@
     %{
       "type" => "function",
       "name" => "write",
-      "description" => "Create or revision-check and replace a workspace file.",
+      "description" =>
+        "Create a missing workspace text file or replace one exact revision. Blind overwrite is not supported.",
       "parameters" => %{
         "type" => "object",
         "properties" => %{
-          "path" => %{"type" => "string"},
-          "content" => %{"type" => "string"},
-          "expected_revision" => %{"type" => "string"}
+          "path" => %{
+            "type" => "string",
+            "description" => "Relative workspace file path."
+          },
+          "content" => %{
+            "type" => "string",
+            "description" => "Complete UTF-8 file content."
+          },
+          "expected_revision" => %{
+            "type" => "string",
+            "description" =>
+              "Use missing for creation or the exact wsr1 revision returned by read."
+          }
         },
         "required" => ["path", "content", "expected_revision"],
         "additionalProperties" => false
@@ -37,14 +61,27 @@
     %{
       "type" => "function",
       "name" => "edit",
-      "description" => "Replace one exact text occurrence in a workspace file.",
+      "description" =>
+        "Replace exactly one literal text occurrence in one revision of a workspace file.",
       "parameters" => %{
         "type" => "object",
         "properties" => %{
-          "path" => %{"type" => "string"},
-          "old_text" => %{"type" => "string"},
-          "new_text" => %{"type" => "string"},
-          "expected_revision" => %{"type" => "string"}
+          "path" => %{
+            "type" => "string",
+            "description" => "Relative workspace file path."
+          },
+          "old_text" => %{
+            "type" => "string",
+            "description" => "Non-empty literal text that must occur exactly once."
+          },
+          "new_text" => %{
+            "type" => "string",
+            "description" => "Literal replacement text; it may be empty."
+          },
+          "expected_revision" => %{
+            "type" => "string",
+            "description" => "Exact wsr1 revision returned by read."
+          }
         },
         "required" => ["path", "old_text", "new_text", "expected_revision"],
         "additionalProperties" => false
@@ -54,14 +91,23 @@
     %{
       "type" => "function",
       "name" => "bash",
-      "description" => "Run a bounded command in the workspace.",
+      "description" =>
+        "Run one bounded Bash command from the workspace root. This is same-user execution, not a sandbox.",
       "parameters" => %{
         "type" => "object",
         "properties" => %{
-          "command" => %{"type" => "string"},
-          "timeout_ms" => %{"type" => "integer", "minimum" => 1}
+          "command" => %{
+            "type" => "string",
+            "description" => "Bash source passed to /bin/bash -lc."
+          },
+          "timeout_ms" => %{
+            "type" => ["integer", "null"],
+            "minimum" => 1,
+            "maximum" => 900_000,
+            "description" => "Lower total timeout, or null for the trusted default."
+          }
         },
-        "required" => ["command"],
+        "required" => ["command", "timeout_ms"],
         "additionalProperties" => false
       },
       "strict" => true

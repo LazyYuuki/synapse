@@ -47,6 +47,8 @@ MutationServer also retains the owner monitor, token, access, limits, and a rand
 unguessable reference token, access, limits, and backend identity, all hidden by
 opaque inspection. Owner death closes the workspace. An acknowledged close stops
 the live MutationServer; repeated close after confirmed process death is idempotent.
+Live close authenticates the token, limits, and Access together, just like an
+operation, so an altered same-token Handle copy cannot close the original.
 
 ## Path Resolution
 
@@ -564,7 +566,8 @@ so a direct read receives `workspace_busy`. An unknown lease is also rejected
 while any read permit remains active.
 
 Admission is grant-or-busy. MutationServer retains no application waiter queue;
-normal sequencing belongs to the future Tool Executor. Concurrent direct callers
+normal multi-call sequencing belongs to the future Agent Loop, while Tool Executor
+handles exactly one admitted call. Concurrent direct callers
 receive an immediate conflict. The GenServer mailbox can still be flooded by
 arbitrary code in the same BEAM node, which is outside the in-VM threat model.
 Committed order follows server receipt/admission order, not send

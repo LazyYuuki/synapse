@@ -212,7 +212,7 @@ defmodule Synapse.Workspace.Fake do
   @impl true
   @doc false
   def close(%Handle{backend: __MODULE__} = handle) do
-    case call_server(handle, :close) do
+    case call_server(handle, {:close, handle.limits, handle.access}) do
       :ok -> :ok
       :closing -> await_server_close(handle.state)
       {:error, :invalid_handle} -> fake_error(:close, nil, nil, :invalid_handle)
@@ -980,7 +980,11 @@ defmodule Synapse.Workspace.Fake.Server do
     end
   end
 
-  def handle_call({:close, token}, from, %{token: token} = state) do
+  def handle_call(
+        {{:close, limits, access}, token},
+        from,
+        %{token: token, limits: limits, access: access} = state
+      ) do
     cond do
       not is_nil(state.close_waiter) ->
         {:reply, :closing, state}

@@ -24,7 +24,7 @@ Open trusted project root
   -> structured Workspace result or error
 ```
 
-The future Tool System should be able to use the same public Workspace facade with either a real temporary workspace or a deterministic Fake handle. Tool code must not call `File`, `System`, or `Port` directly.
+The Tool System uses the same public Workspace facade with either a real temporary workspace or a deterministic Fake handle. Tool code does not call `File`, `System`, or `Port` directly.
 
 ## Checklist Rules
 
@@ -290,7 +290,12 @@ Every operation returns tagged structured data. No bang variants are part of the
 
 `root`, `limits`, and the maximum access ceiling are trusted application configuration, not model input. The returned handle is opaque and contains only backend identity required by the facade. Ordinary inspection must not reveal the absolute root, server state, references, environment, or open resources.
 
-The opening owner is monitored. `close/1` is idempotent. Owner death closes the workspace, releases mutation ownership, and cancels an active process operation. Runtime may later supervise the same lifecycle without changing operation contracts.
+The opening owner is monitored. `close/1` is idempotent after confirmed backend
+death. A live close authenticates the exact token, limits, and Access retained by
+the backend, so an altered same-token Handle cannot close the original. Owner death
+closes the workspace, releases mutation ownership, and cancels an active process
+operation. Runtime may later supervise the same lifecycle without changing
+operation contracts.
 
 ### Limits
 
@@ -1268,7 +1273,10 @@ This reduces accidental inheritance; it is not host isolation. A child running a
 | ExDoc | Documentation build and doctests | None |
 | Platform acceptance | Verified macOS job; future Linux portability job | Temporary filesystem/processes |
 
-## Suggested Test Layout
+## Original Suggested Test Layout
+
+This historical proposal records planning intent; the current `test/` tree and
+ExDoc configuration are authoritative.
 
 ```text
 test/

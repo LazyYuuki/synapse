@@ -509,8 +509,13 @@ defmodule Synapse.Workspace.MutationServerTest do
 
       assert eventually(fn ->
                server_has_message?(handle.state, fn
-                 {:"$gen_call", _from, {:close, token}} when token == handle.token -> true
-                 _message -> false
+                 {:"$gen_call", _from, {:close, token, limits, access}}
+                 when token == handle.token and limits == handle.limits and
+                        access == handle.access ->
+                   true
+
+                 _message ->
+                   false
                end)
              end)
 

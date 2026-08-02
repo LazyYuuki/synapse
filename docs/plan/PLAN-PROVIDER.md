@@ -1020,7 +1020,10 @@ The exact representation may use structs, but scripts must remain readable in Ag
 | Tokamak function call | Live smoke test | Yes |
 | ExDoc | Documentation build and doctests | No |
 
-## Suggested Test Layout
+## Original Suggested Test Layout
+
+This historical proposal records planning intent; the current `test/` tree and
+ExDoc configuration are authoritative.
 
 ```text
 test/

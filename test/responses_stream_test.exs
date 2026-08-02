@@ -52,7 +52,9 @@ defmodule Synapse.Provider.ResponsesStreamTest do
              %ToolCallStarted{call_id: "call-read"},
              %ToolCallDelta{},
              %ToolCallDelta{},
-             %ToolCallCompleted{arguments: %{"path" => "mix.exs"}},
+             %ToolCallCompleted{
+               arguments: %{"path" => "mix.exs", "offset" => nil, "limit" => nil}
+             },
              %MessageCompleted{}
            ] = events
 
@@ -63,7 +65,7 @@ defmodule Synapse.Provider.ResponsesStreamTest do
                id: "item-read",
                call_id: "call-read",
                name: "read",
-               arguments: %{"path" => "mix.exs"}
+               arguments: %{"path" => "mix.exs", "offset" => nil, "limit" => nil}
              }
            ] = response.output_items
   end
@@ -88,10 +90,15 @@ defmodule Synapse.Provider.ResponsesStreamTest do
     assert {:ok, response} = ResponsesStream.finish(state)
     assert Enum.map(response.output_items, & &1.call_id) == ["call-read", "call-bash"]
 
-    assert [%FunctionCall{arguments: %{"path" => "mix.exs"}}, %FunctionCall{arguments: arguments}] =
+    assert [
+             %FunctionCall{
+               arguments: %{"path" => "mix.exs", "offset" => nil, "limit" => nil}
+             },
+             %FunctionCall{arguments: arguments}
+           ] =
              response.output_items
 
-    assert arguments == %{"command" => "mix test"}
+    assert arguments == %{"command" => "mix test", "timeout_ms" => nil}
   end
 
   test "normalizes mixed text and tool output by output_index" do

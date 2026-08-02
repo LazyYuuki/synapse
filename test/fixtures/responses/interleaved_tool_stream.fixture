@@ -45,25 +45,25 @@
     "type" => "response.function_call_arguments.delta",
     "item_id" => "item-read",
     "call_id" => "call-read",
-    "delta" => "\"mix.exs\"}"
+    "delta" => "\"mix.exs\",\"offset\":null,\"limit\":null}"
   },
   %{
     "type" => "response.function_call_arguments.delta",
     "item_id" => "item-bash",
     "call_id" => "call-bash",
-    "delta" => "\"mix test\"}"
+    "delta" => "\"mix test\",\"timeout_ms\":null}"
   },
   %{
     "type" => "response.function_call_arguments.done",
     "item_id" => "item-bash",
     "call_id" => "call-bash",
-    "arguments" => "{\"command\":\"mix test\"}"
+    "arguments" => "{\"command\":\"mix test\",\"timeout_ms\":null}"
   },
   %{
     "type" => "response.function_call_arguments.done",
     "item_id" => "item-read",
     "call_id" => "call-read",
-    "arguments" => "{\"path\":\"mix.exs\"}"
+    "arguments" => "{\"path\":\"mix.exs\",\"offset\":null,\"limit\":null}"
   },
   %{
     "type" => "response.completed",

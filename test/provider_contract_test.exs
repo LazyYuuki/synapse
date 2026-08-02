@@ -158,6 +158,26 @@ defmodule Synapse.ProviderContractTest do
                model: "configured-model",
                output_items: [partial_call]
              )
+
+    complete_call = %FunctionCall{partial_call | arguments: %{"path" => "mix.exs"}}
+
+    assert {:error, {:status, :must_be_completed}} =
+             Response.new(
+               id: "response-failed",
+               model: "configured-model",
+               output_items: [complete_call],
+               status: :failed
+             )
+
+    assert {:error, {:output_items, :must_have_unique_item_and_call_ids}} =
+             Response.new(
+               id: "response-duplicates",
+               model: "configured-model",
+               output_items: [
+                 complete_call,
+                 %FunctionCall{complete_call | id: "item-2"}
+               ]
+             )
   end
 
   test "constructs a sanitized error without a raw response body" do

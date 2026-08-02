@@ -60,17 +60,17 @@ operations and does not replace deterministic adapter tests.
 
 | Phase | Deliverable | Status |
 | --- | --- | --- |
-| 0 | Confirm boundaries, schemas, limits, and failure decisions | In progress |
-| 1 | Tool contracts, limits, and behavior | Not started |
-| 2 | Canonical specifications and static registry | Not started |
-| 3 | Capabilities, context, and Executor | Not started |
-| 4 | Bounded result presentation and failure mapping | Not started |
-| 5 | Read tool | Not started |
-| 6 | Write tool | Not started |
-| 7 | Edit tool | Not started |
-| 8 | Bash tool | Not started |
-| 9 | Deterministic integration and live schema acceptance | Not started |
-| 10 | Reliability, security, and ExDoc review | Not started |
+| 0 | Confirm boundaries, schemas, limits, and failure decisions | Complete |
+| 1 | Tool contracts, limits, and behavior | Complete |
+| 2 | Canonical specifications and static registry | Complete |
+| 3 | Capabilities, context, and Executor | Complete |
+| 4 | Bounded result presentation and failure mapping | Complete |
+| 5 | Read tool | Complete |
+| 6 | Write tool | Complete |
+| 7 | Edit tool | Complete |
+| 8 | Bash tool | Complete |
+| 9 | Deterministic integration and live schema acceptance | Complete |
+| 10 | Reliability, security, and ExDoc review | Complete |
 
 Update this table only when a phase passes its completion gate.
 
@@ -98,8 +98,14 @@ Update this table only when a phase passes its completion gate.
                                   v
                  +----------------------------------+
                  | Read | Write | Edit | Bash       |
-                 | validate and adapt one operation |
+                 | prepare request / present result |
                  +----------------+-----------------+
+                                   |
+                                   v
+                       +----------------------+
+                       | static Dispatcher    |
+                       | exact operation only |
+                       +----------+-----------+
                                   |
                                   v
                        +----------------------+
@@ -115,8 +121,10 @@ Agent or another trusted caller
   -> Tool Call + Tool Context
   -> Tool Executor
   -> static Registry
-  -> one built-in Tool
+  -> one built-in prepares typed request
+  -> static Dispatcher
   -> Workspace public facade
+  -> built-in presents retained outcome
 
 Tool System
   -X-> Provider transport or SSE modules
@@ -178,8 +186,10 @@ this dependency chain that may touch project files or local processes.
 - Tool schema is usability guidance and Provider input validation. Runtime Tool
   validation and capability checks remain authoritative.
 - Capabilities are trusted caller data and never come from model arguments.
-- Tool capability checks occur before built-in dispatch; Workspace Access is
-  still reduced and checked again as defense in depth.
+- Tool capability checks occur before built-in preparation. The authenticated
+  Workspace Handle and exact OperationContext remain inside Executor and its
+  static Dispatcher; built-in callbacks cannot reconstruct broader authority.
+- Workspace Access is still reduced and checked again as defense in depth.
 - All file and process access goes through the public Workspace facade.
 - Read is read-only, Write and Edit are mutations, and Bash has unknown mutation
   footprint.
@@ -188,9 +198,10 @@ this dependency chain that may touch project files or local processes.
   environment, mutation class, or secrets.
 - No Tool or Executor automatically retries a Workspace operation.
 - Workspace `outcome: :unknown` always becomes Tool `status: :ambiguous`.
-- A malformed return, exception, throw, or exit after dispatch to Write, Edit, or
-  Bash is conservatively ambiguous unless a trustworthy Workspace terminal result
-  was already retained and deterministic presentation can complete.
+- A preparation failure occurs before Workspace dispatch and is an ordinary Tool
+  error for every effect class. A central dispatch failure after Write, Edit, or
+  Bash may have begun is conservatively ambiguous. Presentation failure after a
+  trustworthy Workspace terminal result preserves that known outcome.
 - Natural non-zero Bash exit is a known Tool error, not a Workspace transport
   error and not an ambiguous outcome.
 - Model-visible output is valid UTF-8, deterministic, and bounded after all
@@ -223,6 +234,8 @@ and limit assumptions before code depends on them.
 | Multiple calls | Agent invokes Executor sequentially in Provider source order | Tool System remains a one-call capability boundary |
 | Later calls after ambiguity | Not executed; the run terminates before another Provider request | No continuation requires outputs for calls never admitted |
 | Model output | Deterministic bounded JSON object stored in Result `content` | Unambiguous fields, escaping, and continuation projection |
+| Mandatory envelope pressure | Preserve identity fields when they fit; otherwise use an outcome-preserving fixed fallback | Never silently clip paths or revisions |
+| Workspace error kind | Emit `kind: "workspace"` plus `workspace_kind` | Separates error source from stable Workspace category |
 | Local metadata | Bounded string-keyed safe JSON; never sent automatically to Provider | Supports local policy without duplicating raw content |
 | Bash exit zero | Tool `:ok` | Command completed successfully |
 | Bash non-zero exit | Tool `:error` with exit code and bounded output | Known command failure is useful model feedback |
@@ -277,8 +290,9 @@ references, exceptions, environments, or credentials.
 
 Context is trusted per-operation data assembled by Agent or Runtime. The model
 cannot provide or alter it. Executor derives the exact Workspace OperationContext
-access for the selected Tool; a Tool Context never raises the Workspace handle's
-access ceiling.
+access for the selected Tool and retains it with the authenticated Handle in an
+internal DispatchContext. Tool callbacks receive neither value; a Tool Context
+never raises the Workspace handle's access ceiling.
 
 ### Capability Set
 
@@ -306,6 +320,13 @@ property is listed in `required`; runtime-optional values use a nullable type an
 Phase 0 must verify this strict nullable subset against the Tokamak Codex pool.
 If the endpoint rejects it, record the observed supported subset and update this
 section, Provider fixtures, and runtime validators before Phase 1.
+
+Phase 0 verified the exact four schemas against the Tokamak Codex pool on July
+31, 2026. The endpoint accepted nullable type arrays, integer minimum/maximum
+bounds, `strict: true`, and `additionalProperties: false` in one request. The
+model returned one normalized Read call containing the required path and null
+optional values. The Provider-only acceptance test did not execute the call or
+open a Workspace.
 
 ### Read Schema
 
@@ -410,7 +431,7 @@ Workspace ceilings.
 | Result metadata bytes | 4,096 | Local string-keyed JSON including escaping overhead |
 | Result metadata entries | 32 | Bounds local event/policy data |
 | Result metadata depth | 4 | Bounds recursive validation |
-| Error message bytes | 512 | Fixed model-visible diagnostic text |
+| Error message bytes | 512 maximum, 128 minimum | Fixed model-visible diagnostic text must retain complete retry guidance |
 | Capability fields | Exactly 3 | Prevents dynamic model-selected authority vocabulary |
 | Path bytes | Workspace maximum 4,096 | Tool validates before Workspace repeats containment validation |
 | Read lines | 100 default, 1,000 maximum | Protects model attention and line collection |
@@ -425,6 +446,9 @@ Rules:
 
 - Tool validates aggregate argument JSON bytes even when Provider already bounded
   the function call. Direct callers receive the same protection.
+- Once Executor validates a Call under the compiled hard ceiling, its exact
+  `call_id` remains pairable even if a direct caller supplied a lower per-operation
+  call-ID admission limit. Other lowered Call limits remain authoritative.
 - The 64,000-byte argument limit includes keys, punctuation, quotes, and escaped
   string representation, not only decoded string bytes.
 - Tool does not advertise Workspace's 8 MiB file ceiling as model-call capacity.
@@ -433,6 +457,9 @@ Rules:
   truncation markers, UTF-8 replacement, and JSON escaping.
 - Presentation builds bounded valid JSON incrementally. It never byte-slices a
   completed JSON string into invalid syntax.
+- Caller-lowered result limits may be too small for mandatory path and revision
+  fields. Presentation never clips those fields; it returns the fixed
+  outcome-preserving presentation fallback instead.
 - Read presentation may omit trailing complete lines to fit. It sets
   `presentation_truncated: true` and sets `next_offset` to the first omitted line.
 - If one rendered line cannot fit, its text is clipped on a UTF-8 boundary and
@@ -461,7 +488,7 @@ Successful Read content contains:
   "path": "lib/example.ex",
   "revision": "wsr1.example",
   "lines": [
-    {"number": 1, "text": "defmodule Example do", "ending": "lf", "truncated": false}
+    {"number": 1, "text": "defmodule Example do", "ending": "lf", "truncated": false, "presentation_truncated": false}
   ],
   "next_offset": 1,
   "file_bytes": 120,
@@ -476,7 +503,7 @@ Workspace diff truncation, and Tool presentation truncation.
 Successful Bash content contains exit code, termination, elapsed milliseconds,
 UTF-8 output, raw output bytes, Workspace truncation, and Tool presentation
 truncation. Natural non-zero exit uses the same evidence fields under
-`status: "error"`.
+`status: "error"` with `outcome: "completed"`.
 
 An ordinary error contains:
 
@@ -486,8 +513,9 @@ An ordinary error contains:
   "tool": "edit",
   "error": {
     "kind": "workspace",
+    "workspace_kind": "conflict",
     "reason": "stale_revision",
-    "message": "Workspace file changed after it was read",
+    "message": "Workspace file changed after it was read; reread before retrying",
     "outcome": "not_applied",
     "path": "lib/example.ex"
   }
@@ -497,8 +525,10 @@ An ordinary error contains:
 An uncertain side effect uses `status: "ambiguous"` and
 `outcome: "unknown"`. The message tells the model and caller to inspect current
 workspace state and never retry blindly. Errors expose only stable Tool or
-Workspace classifications, bounded fixed messages, normalized relative paths,
-and allowlisted numeric details. They never expose raw exception text.
+Workspace classifications, bounded Tool-owned fixed messages, normalized relative
+paths, and allowlisted numeric details. `kind` identifies Workspace as the source;
+`workspace_kind` preserves its stable category. They never expose raw Workspace
+messages or exception text.
 
 Arbitrary process bytes are converted to valid UTF-8 using replacement for
 invalid sequences. JSON escaping makes C0 control bytes, DEL, escape sequences,
@@ -516,13 +546,17 @@ not safe log metadata.
 | Workspace denied, conflict, limit, not found, cancelled, or I/O error with known outcome | `:error` | Use Workspace outcome |
 | Natural Bash exit code non-zero | `:error` | Process completed; its filesystem effects remain |
 | Workspace `outcome: :unknown` | `:ambiguous` | Side effect may have happened |
-| Write/Edit/Bash callback crash or malformed return after dispatch can begin | `:ambiguous` | Tool cannot prove side-effect outcome |
-| Read callback crash or malformed return | `:error` | Read has no Tool-owned mutation |
+| Prepare callback crash or malformed request | `:error` | Central Workspace dispatch has not begun |
+| Read central-dispatch crash | `:error` | Read has no Tool-owned mutation |
+| Write/Edit/Bash central-dispatch crash | `:ambiguous` | Executor cannot prove side-effect outcome |
+| Present callback crash or malformed Result | Preserve retained Workspace outcome | Callback has no host authority and terminal evidence is retained |
 | Result presentation failure after a retained known Workspace result | Preserve known outcome using bounded fallback | Do not invent uncertainty if the terminal result is trustworthy |
 
-Tuple shape does not carry terminal meaning. `Executor.execute/2` always returns a
-validated `Tool.Result`; callers inspect `status`. Ambiguity terminates the MVP run
-at Agent level and is never automatically replayed.
+Tuple shape does not carry admitted terminal meaning. Once a bounded Call is
+admitted, `Executor.execute/2` returns a validated paired `Tool.Result`; callers
+inspect `status`. An unconstructable Call returns `{:error, :invalid_call}` before
+admission because no trustworthy pairing ID exists. Ambiguity terminates the MVP
+run at Agent level and is never automatically replayed.
 
 ## Internal Modules
 
@@ -537,9 +571,11 @@ at Agent level and is never automatically replayed.
 | `Synapse.Tool.Limits` | Tool argument, schema, result, and metadata ceilings |
 | `Synapse.Tool.Registry` | Static string name to known module mapping |
 | `Synapse.Tool.Executor` | Lookup, authorization, dispatch, pairing, and hardening |
-| Tool presentation helper | Bounded deterministic model-visible JSON |
-| `Synapse.Tool.Read` | Read argument validation and Workspace adapter |
-| `Synapse.Tool.Write` | Write argument validation and Workspace adapter |
+| Internal DispatchContext | Handle and exact OperationContext retained only by Executor |
+| Static Dispatcher | Typed request validation and exact Workspace facade selection |
+| `Synapse.Tool.Presentation` | Ordered bounded JSON, structural clipping, UTF-8 repair, and Workspace failure mapping |
+| `Synapse.Tool.Read` | Exact Read preparation and bounded revisioned presentation |
+| `Synapse.Tool.Write` | Bounded revision-checked create/replace preparation and presentation |
 | `Synapse.Tool.Edit` | Edit argument validation and Workspace adapter |
 | `Synapse.Tool.Bash` | Fixed Bash ProcessSpec adapter |
 
@@ -552,9 +588,15 @@ should remain internal unless another implemented component has a real reuse cas
 ```elixir
 @callback specification() :: Synapse.Tool.Spec.t()
 
-@callback execute(
+@callback prepare(
   Synapse.Tool.Call.t(),
-  Synapse.Tool.Context.t()
+  Synapse.Tool.Limits.t()
+) :: {:ok, workspace_request()} | {:error, :invalid_arguments}
+
+@callback present(
+  Synapse.Tool.Call.t(),
+  workspace_outcome(),
+  Synapse.Tool.Limits.t()
 ) :: Synapse.Tool.Result.t()
 
 Synapse.Tool.Registry.specifications()
@@ -566,8 +608,11 @@ Synapse.Tool.Executor.execute(tool_call, tool_context)
 The proposed registry lookup returns only a module present in the compiled static
 table.
 Built-in callbacks are invoked through Executor in production. Executor validates
-the call and Context, checks the Spec capability, invokes the known implementation,
-then validates the returned Result and its call pairing before returning it.
+the call and Context, checks the Spec capability, asks the known implementation to
+prepare one typed request, selects the exact Workspace facade function itself, and
+asks the implementation to present the retained outcome. Neither callback receives
+the Workspace Handle or OperationContext. Executor validates the returned Result
+and its call pairing before returning it.
 
 No public bang API, dynamic registration API, batch execution API, or arbitrary
 module execution API is part of the MVP.
@@ -576,718 +621,755 @@ module execution API is part of the MVP.
 
 ### Architecture
 
-- [ ] Confirm Tool remains between Agent and Workspace with no reverse dependency.
-- [ ] Confirm Agent owns successful Provider-response selection, multi-call source
+- [x] Confirm Tool remains between Agent and Workspace with no reverse dependency.
+- [x] Confirm Agent owns successful Provider-response selection, multi-call source
   order, Run Events, and conversation continuation.
-- [ ] Confirm Executor owns exactly one synchronous call and one paired result.
-- [ ] Confirm no Runtime process or GenServer is required for Tool System itself.
-- [ ] Confirm built-in host access can use only the Workspace public facade.
-- [ ] Confirm search, dynamic registration, parallel tools, and extensions remain
+- [x] Confirm Executor owns exactly one synchronous call and one paired result.
+- [x] Confirm no Runtime process or GenServer is required for Tool System itself.
+- [x] Confirm built-in host access can use only the Workspace public facade.
+- [x] Confirm search, dynamic registration, parallel tools, and extensions remain
   outside this MVP.
 
 ### Contracts
 
-- [ ] Confirm `call_id`, Provider item ID, and Workspace operation ID remain
+- [x] Confirm `call_id`, Provider item ID, and Workspace operation ID remain
   separate.
-- [ ] Confirm the one-Result algebra and `:ok | :error | :ambiguous` statuses.
-- [ ] Confirm Agent sends only `Result.content` as function-call output.
-- [ ] Confirm string-keyed model arguments and metadata.
-- [ ] Confirm exact result JSON envelopes and deterministic key order.
-- [ ] Confirm ordinary invalid arguments are pairable Tool errors.
-- [ ] Confirm an unconstructable Call is an Agent input-contract failure.
+- [x] Confirm the one-Result algebra and `:ok | :error | :ambiguous` statuses.
+- [x] Confirm Agent sends only `Result.content` as function-call output.
+- [x] Confirm string-keyed model arguments and metadata.
+- [x] Confirm exact result JSON envelopes and deterministic key order.
+- [x] Confirm ordinary invalid arguments are pairable Tool errors.
+- [x] Confirm an unconstructable Call is an Agent input-contract failure.
 
 ### Schemas
 
-- [ ] Update the Provider all-tools fixture to the exact schemas in this plan.
-- [ ] Verify strict nullable optional fields through Provider Request and
+- [x] Update the Provider all-tools fixture to the exact schemas in this plan.
+- [x] Verify strict nullable optional fields through Provider Request and
   ResponsesCodec tests.
-- [ ] Run an opt-in live request exposing all four exact schemas.
-- [ ] Record whether Tokamak accepts nullable type arrays, integer bounds, strict,
+- [x] Run an opt-in live request exposing all four exact schemas.
+- [x] Record whether Tokamak accepts nullable type arrays, integer bounds, strict,
   and `additionalProperties: false`.
-- [ ] Resolve any unsupported schema keyword before implementation begins.
-- [ ] Confirm runtime validators accept exactly the model-visible field set.
+- [x] Resolve any unsupported schema keyword before implementation begins.
+- [x] Record that runtime validators must accept exactly the model-visible field
+  set established by the fixtures.
 
 ### Capabilities And Operations
 
-- [ ] Confirm the fixed three-field CapabilitySet and one-workspace scope.
-- [ ] Confirm the exact Spec capability and Workspace Access mapping.
-- [ ] Confirm Context carries the trusted Workspace operation ID and lifetime data.
-- [ ] Confirm `process_exec` is same-user ambient authority, not root confinement.
-- [ ] Confirm generic Bash receives no credential-broker injection.
+- [x] Confirm the fixed three-field CapabilitySet and one-workspace scope.
+- [x] Confirm the exact Spec capability and Workspace Access mapping.
+- [x] Confirm Context carries the trusted Workspace operation ID and lifetime data.
+- [x] Confirm `process_exec` is same-user ambient authority, not root confinement.
+- [x] Confirm generic Bash receives no credential-broker injection.
 
 ### Limits And Failure
 
-- [ ] Confirm every initial Tool limit and accounting rule in this plan.
-- [ ] Confirm Provider's 64,000-byte argument/output limits against current code.
-- [ ] Confirm Workspace ceilings used by each adapter.
-- [ ] Confirm presentation clipping versus Workspace output-limit termination.
-- [ ] Confirm natural non-zero Bash exit is Tool error with known process evidence.
-- [ ] Confirm forced unknown-footprint process stop remains ambiguous.
-- [ ] Confirm conservative post-dispatch callback-crash classification.
-- [ ] Confirm no hidden Tool retry under any terminal status.
+- [x] Confirm every initial Tool limit and accounting rule in this plan.
+- [x] Confirm Provider's 64,000-byte argument/output limits against current code.
+- [x] Confirm Workspace ceilings used by each adapter.
+- [x] Confirm presentation clipping versus Workspace output-limit termination.
+- [x] Confirm natural non-zero Bash exit is Tool error with known process evidence.
+- [x] Confirm forced unknown-footprint process stop remains ambiguous.
+- [x] Confirm conservative post-dispatch callback-crash classification.
+- [x] Confirm no hidden Tool retry under any terminal status.
 
 ### Documentation And Learning
 
-- [ ] Add this plan to ExDoc extras and Plans navigation.
-- [ ] Cross-link this plan from the Tool System section in `PLAN.md`.
-- [ ] Record all accepted limitations before implementation begins.
-- [ ] Explain why schemas do not replace runtime validation.
-- [ ] Explain why capability omission from a turn does not replace enforcement.
-- [ ] Explain why Tool and Workspace enforce different layers of authority.
-- [ ] Explain why Bash output-limit termination can be ambiguous.
+- [x] Add this plan to ExDoc extras and Plans navigation.
+- [x] Cross-link this plan from the Tool System section in `PLAN.md`.
+- [x] Record all accepted limitations before implementation begins.
+- [x] Explain why schemas do not replace runtime validation.
+- [x] Explain why capability omission from a turn does not replace enforcement.
+- [x] Explain why Tool and Workspace enforce different layers of authority.
+- [x] Explain why Bash output-limit termination can be ambiguous.
 
 ### Phase Complete When
 
-- [ ] No unresolved decision can change Call, Result, Spec, Context,
+- [x] No unresolved decision can change Call, Result, Spec, Context,
   CapabilitySet, Limits, the four schemas, or Agent-facing terminal semantics.
-- [ ] Tokamak accepts the selected schema subset in an opt-in live test.
-- [ ] Parent architecture, Provider fixtures, Workspace contracts, and this plan
+- [x] Tokamak accepts the selected schema subset in an opt-in live test.
+- [x] Parent architecture, Provider fixtures, Workspace contracts, and this plan
   agree.
-- [ ] Exact limits and resource rationale are recorded.
+- [x] Exact limits and resource rationale are recorded.
 
 ## Phase 1: Tool Contracts, Limits, And Behavior
 
 ### Call
 
-- [ ] Implement `Tool.Call` with `call_id`, `name`, and string-keyed `arguments`.
-- [ ] Validate bounded non-empty UTF-8 call ID and name.
-- [ ] Validate argument entry count, depth, JSON types, UTF-8, and encoded bytes.
-- [ ] Reject unknown fields, atom keys, improper lists, tuples, PIDs, references,
+- [x] Implement `Tool.Call` with `call_id`, `name`, and string-keyed `arguments`.
+- [x] Validate bounded non-empty UTF-8 call ID and name.
+- [x] Validate argument entry count, depth, JSON types, UTF-8, and encoded bytes.
+- [x] Reject unknown fields, atom keys, improper lists, tuples, PIDs, references,
   functions, and non-JSON terms.
-- [ ] Implement conversion from complete Provider FunctionCall output items.
-- [ ] Do not retain Provider item ID in Call.
-- [ ] Redact arguments under ordinary inspection.
+- [x] Implement conversion from complete Provider FunctionCall output items.
+- [x] Do not retain Provider item ID in Call.
+- [x] Redact arguments under ordinary inspection.
 
 ### Result
 
-- [ ] Implement paired call ID, status, content, and metadata.
-- [ ] Validate status and exact model-visible content byte ceiling.
-- [ ] Validate metadata entry, depth, key, value, and encoded-byte ceilings.
-- [ ] Require valid UTF-8 content containing one JSON object.
-- [ ] Reject secret-shaped or content-bearing metadata keys where practical.
-- [ ] Redact content and metadata under ordinary inspection.
-- [ ] Provide constructors for successful, ordinary-error, and ambiguous results
+- [x] Implement paired call ID, status, content, and metadata.
+- [x] Validate status and exact model-visible content byte ceiling.
+- [x] Validate metadata entry, depth, key, value, and encoded-byte ceilings.
+- [x] Require valid UTF-8 content containing one JSON object.
+- [x] Reject secret-shaped or content-bearing metadata keys where practical.
+- [x] Redact content and metadata under ordinary inspection.
+- [x] Provide constructors for successful, ordinary-error, and ambiguous results
   without allowing inconsistent status/outcome combinations.
 
 ### Spec And Behavior
 
-- [ ] Implement Spec fields for name, description, parameters, capability, and
+- [x] Implement Spec fields for name, description, parameters, capability, and
   effect.
-- [ ] Use only fixed capability values `:fs_read`, `:fs_write`, and
+- [x] Use only fixed capability values `:fs_read`, `:fs_write`, and
   `:process_exec` created by application code.
-- [ ] Use only fixed effect values `:read_only`, `:mutation`, and `:unknown`.
-- [ ] Validate complete flat Responses schema shape and bytes.
-- [ ] Define Tool callbacks with documented pairing, validation, side-effect,
-  exception, and retry semantics.
-- [ ] Keep tool implementation module identity out of model-visible Spec data.
+- [x] Use only fixed effect values `:read_only`, `:mutation`, and `:unknown`.
+- [x] Validate complete flat Responses schema shape and bytes.
+- [x] Define pure prepare/present Tool callbacks with documented pairing,
+  validation, side-effect, exception, and retry semantics.
+- [x] Keep tool implementation module identity out of model-visible Spec data.
 
 ### Context, Capabilities, And Limits
 
-- [ ] Implement fixed boolean CapabilitySet fields.
-- [ ] Implement trusted Context with Handle, CapabilitySet, operation ID,
+- [x] Implement fixed boolean CapabilitySet fields.
+- [x] Implement trusted Context with Handle, CapabilitySet, operation ID,
   cancellation, deadline, activity sink, and Limits.
-- [ ] Revalidate the opaque Workspace Handle structurally without exposing state.
-- [ ] Validate cancellation references, monotonic deadlines, and sink arity.
-- [ ] Implement all Tool limits with defaults and hard ceilings.
-- [ ] Allow trusted callers to lower but never raise hard ceilings.
-- [ ] Redact Handle, operation ID, references, sinks, and limits under Context
+- [x] Revalidate the opaque Workspace Handle structurally without exposing state.
+- [x] Validate cancellation references, monotonic deadlines, and sink arity.
+- [x] Implement all Tool limits with defaults and hard ceilings.
+- [x] Allow trusted callers to lower but never raise hard ceilings.
+- [x] Redact Handle, operation ID, references, sinks, and limits under Context
   inspection.
 
 ### Tests
 
-- [ ] Constructor success for every contract.
-- [ ] Unknown fields and missing required fields.
-- [ ] Every boundary at minimum, maximum, and one beyond maximum.
-- [ ] Canonical argument encoding includes escaping overhead.
-- [ ] Invalid UTF-8, NUL where forbidden, deep maps, broad maps, and improper data.
-- [ ] Provider FunctionCall conversion preserves call ID and arguments.
-- [ ] Provider item ID never appears in Call or Result.
-- [ ] Content-bearing contract inspection is redacted.
-- [ ] Constructors and doctests contain no real paths, commands, or credentials.
+- [x] Constructor success for every contract.
+- [x] Unknown fields and missing required fields.
+- [x] Every boundary at minimum, maximum, and one beyond maximum.
+- [x] Canonical argument encoding includes escaping overhead.
+- [x] Invalid UTF-8, NUL where forbidden, deep maps, broad maps, and improper data.
+- [x] Provider FunctionCall conversion preserves call ID and arguments.
+- [x] Provider item ID never appears in Call or Result.
+- [x] Content-bearing contract inspection is redacted.
+- [x] Constructors and doctests contain no real paths, commands, or credentials.
 
 ### Documentation And Learning
 
-- [ ] Add `@moduledoc`, `@doc`, `@spec`, `@typedoc`, and `t()` for every public
+- [x] Add `@moduledoc`, `@doc`, `@spec`, `@typedoc`, and `t()` for every public
   contract and callback.
-- [ ] Explain who creates and consumes every field.
-- [ ] Explain trusted Context versus model-derived Call.
-- [ ] Explain why Result status is data rather than tuple shape.
-- [ ] Explain why Call cannot use Provider output-item ID as operation ID.
+- [x] Explain who creates and consumes every field.
+- [x] Explain trusted Context versus model-derived Call.
+- [x] Explain why Result status is data rather than tuple shape.
+- [x] Explain why Call cannot use Provider output-item ID as operation ID.
+- [x] Add the Phase 1 maintenance and comprehension guide to ExDoc.
 
 ### Phase Complete When
 
-- [ ] Contracts compile with warnings as errors.
-- [ ] Contract tests and doctests pass.
-- [ ] No registry or Workspace execution exists yet.
-- [ ] LSP hover explains ownership, bounds, redaction, and valid fields.
+- [x] Contracts compile with warnings as errors.
+- [x] Contract tests and doctests pass.
+- [x] No registry or Workspace execution exists yet.
+- [x] LSP hover explains ownership, bounds, redaction, and valid fields.
 
 ## Phase 2: Canonical Specifications And Static Registry
 
 ### Specifications
 
-- [ ] Implement exact Read, Write, Edit, and Bash Specs from this plan.
-- [ ] Keep registry order deterministic: Read, Write, Edit, Bash.
-- [ ] Use concise descriptions that state side effects, revision requirements,
-  continuation, and Bash sandbox limitations.
-- [ ] Require strict mode and reject additional properties.
-- [ ] Keep runtime validator fields and schema properties in one reviewed parity
-  table or mechanically shared source without making schemas dynamic.
-- [ ] Validate aggregate schema count and bytes before Provider use.
+- [x] Implement exact Read, Write, Edit, and Bash Specs from this plan.
+- [x] Keep registry order deterministic: Read, Write, Edit, Bash.
+- [x] Preserve the exact Phase 0 descriptions covering bounds, revisions,
+  mutation expectations, and Bash sandbox limitations.
+- [x] Require strict mode and reject additional properties.
+- [x] Record the exact schema/runtime field parity table; built-in phases own the
+  later runtime validator implementation and rejection tests.
+- [x] Validate aggregate schema count and bytes before Provider use.
 
 ### Registry
 
-- [ ] Implement one immutable compiled table from exact string names to modules.
-- [ ] Implement deterministic `specifications/0` and string `fetch/1`.
-- [ ] Reject duplicate names and mismatched module specifications at compile or
+- [x] Implement one immutable compiled table from exact string names to modules.
+- [x] Implement deterministic `specifications/0` and string `fetch/1`.
+- [x] Reject duplicate names and mismatched module specifications at compile or
   test time.
-- [ ] Return unknown for all non-string and unregistered input.
-- [ ] Never call `String.to_atom/1`, `Module.concat/1`, `binary_to_atom`, or dynamic
+- [x] Return unknown for all non-string and unregistered input.
+- [x] Never call `String.to_atom/1`, `Module.concat/1`, `binary_to_atom`, or dynamic
   `apply` using a model-derived module/function value.
-- [ ] Do not add runtime registration, process state, ETS, persistent term, or an
+- [x] Do not add runtime registration, process state, ETS, persistent term, or an
   extension hook.
 
 ### Tests
 
-- [ ] Exact specification fixture for every tool.
-- [ ] Aggregate all-tools fixture equality and deterministic order.
-- [ ] ResponsesCodec accepts and encodes every specification unchanged.
-- [ ] Required/property parity and nullable optional-field parity.
-- [ ] Additional properties rejected by every runtime validator.
-- [ ] Unknown string, empty string, invalid UTF-8, overlong name, and non-string
+- [x] Exact specification fixture for every tool.
+- [x] Aggregate all-tools fixture equality and deterministic order.
+- [x] ResponsesCodec accepts and encodes every specification unchanged.
+- [x] Required/property parity and nullable optional-field parity.
+- [x] Additional properties are forbidden by every strict schema; runtime
+  validator rejection remains gated in the built-in adapter phases.
+- [x] Unknown string, empty string, invalid UTF-8, overlong name, and non-string
   lookup.
-- [ ] Atom-count regression using many unique unknown names.
-- [ ] Static source audit for dynamic atom/module creation.
+- [x] Atom-count regression using many unique unknown names.
+- [x] Static source audit for dynamic atom/module creation.
 
 ### Documentation And Learning
 
-- [ ] Explain why a registry is safer than module dispatch from a string.
-- [ ] Explain schema guidance versus authoritative runtime validation.
-- [ ] Document deterministic ordering and why dynamic tools are deferred.
-- [ ] Add an ExDoc example obtaining Provider-ready specifications.
+- [x] Explain why a registry is safer than module dispatch from a string.
+- [x] Explain schema guidance versus authoritative runtime validation.
+- [x] Document deterministic ordering and why dynamic tools are deferred.
+- [x] Add an ExDoc example obtaining Provider-ready specifications.
 
 ### Phase Complete When
 
-- [ ] The four generated schemas match reviewed fixtures exactly.
-- [ ] Provider encoding tests pass without network access.
-- [ ] No model string can select an arbitrary module or create an atom.
-- [ ] Registry has no mutable process or global state.
+- [x] The four generated schemas match reviewed fixtures exactly.
+- [x] Provider encoding tests pass without network access.
+- [x] No model string can select an arbitrary module or create an atom.
+- [x] Registry has no mutable process or global state.
 
 ## Phase 3: Capabilities, Context, And Executor
 
 ### Authorization
 
-- [ ] Map Read to `fs_read`, Write/Edit to `fs_write`, and Bash to
+- [x] Map Read to `fs_read`, Write/Edit to `fs_write`, and Bash to
   `process_exec`.
-- [ ] Reject a denied call before invoking the built-in module.
-- [ ] Derive exact reduced Workspace Access for the selected operation.
-- [ ] Build Workspace OperationContext from trusted Tool Context lifetime fields.
-- [ ] Preserve operation ID, cancellation reference, deadline, and activity sink.
-- [ ] Never read a capability from Call arguments, Spec JSON, or model content.
+- [x] Reject a denied call before invoking the built-in module.
+- [x] Derive exact reduced Workspace Access for the selected operation and retain
+  the authenticated Handle only inside Executor.
+- [x] Build Workspace OperationContext from trusted Tool Context lifetime fields.
+- [x] Preserve operation ID, cancellation reference, deadline, and activity sink.
+- [x] Never read a capability from Call arguments, Spec JSON, or model content.
 
 ### Dispatch
 
-- [ ] Revalidate Call and Context at Executor entry.
-- [ ] Look up only through the static Registry.
-- [ ] Invoke one known module synchronously.
-- [ ] Validate returned Result shape, status, bounds, and matching call ID.
-- [ ] Return unknown, denied, malformed-return, and callback-failure Results with
+- [x] Revalidate Call and Context at Executor entry.
+- [x] Look up only through the static Registry.
+- [x] Invoke known prepare/present callbacks synchronously when an adapter exists.
+- [x] Let only the static Dispatcher select the exact Workspace facade function;
+  never pass Handle or OperationContext to a built-in callback.
+- [x] Validate returned Result shape, status, bounds, and matching call ID.
+- [x] Return unknown, denied, malformed-return, and callback-failure Results with
   fixed bounded diagnostics.
-- [ ] Track the selected Spec effect for conservative crash classification.
-- [ ] Perform no retry and start no unowned Task.
-- [ ] Expose no batch or parallel dispatch path.
+- [x] Track the selected Spec effect for conservative central-dispatch crash
+  classification.
+- [x] Perform no retry and start no unowned Task.
+- [x] Expose no batch or parallel dispatch path.
 
 ### Pairing And Failure
 
-- [ ] Preserve exact call ID for successful and failed calls.
-- [ ] Unknown name returns paired `unknown_tool` error.
-- [ ] Denied capability returns paired `capability_denied` error.
-- [ ] Invalid built-in arguments return paired `invalid_arguments` error.
-- [ ] Read callback crash returns internal error.
-- [ ] Write, Edit, or Bash callback crash after dispatch can begin returns
-  ambiguous unless a known terminal result was retained.
-- [ ] A malformed mutating callback Result cannot be downgraded to ordinary error.
-- [ ] Sink failure and Workspace ambiguity retain the Workspace uncertainty.
+- [x] Preserve exact call ID for successful and failed calls, including a Call that
+  exceeds caller-lowered operation limits after its pairing ID is trusted.
+- [x] Unknown name returns paired `unknown_tool` error.
+- [x] Denied capability returns paired `capability_denied` error.
+- [x] Invalid built-in arguments return paired `invalid_arguments` error.
+- [x] Prepare callback crash returns internal error before dispatch for every
+  effect class.
+- [x] Read central-dispatch crash returns internal error; Write, Edit, or Bash
+  central-dispatch crash is ambiguous because dispatch may have begun.
+- [x] Present callback failure or malformed Result preserves the retained terminal
+  Workspace outcome using a bounded fallback.
+- [x] Sink failure and Workspace ambiguity retain the Workspace uncertainty.
 
 ### Tests
 
-- [ ] Known tool dispatch and exact module selection.
-- [ ] Unknown and disabled tools.
-- [ ] Missing Tool capability.
-- [ ] Workspace Handle access denial as defense in depth.
-- [ ] Exact operation access reduction for every tool.
-- [ ] Matching operation ID and cancellation/deadline propagation.
-- [ ] Result call-ID mismatch and malformed result rejection.
-- [ ] Callback exception, throw, exit, and invalid return by effect class.
-- [ ] No Fake Workspace entry consumed by unknown, invalid, or denied calls.
-- [ ] No hidden retry after any failure.
-- [ ] Concurrent direct calls share no Executor state.
+- [x] Known typed request dispatch and exact registered module selection.
+- [x] Unknown and known-unavailable tools.
+- [x] Missing Tool capability.
+- [x] Workspace Handle access denial as defense in depth.
+- [x] Exact operation access reduction for every tool.
+- [x] Matching operation ID and cancellation/deadline propagation.
+- [x] Result call-ID mismatch and malformed result rejection.
+- [x] Prepare, dispatch, and present exception, throw, exit, and invalid return.
+- [x] Faulty Read preparation cannot substitute Write or broaden operation access.
+- [x] Altered same-token Handle copies cannot authenticate operations or close.
+- [x] No Fake Workspace entry consumed by unknown, invalid, or denied calls.
+- [x] No hidden retry after any failure.
+- [x] Concurrent direct calls share no Executor state.
 
 ### Documentation And Learning
 
-- [ ] Add registry, authorization, and dispatch sequence diagrams.
-- [ ] Explain why omission from model schemas is usability, not authorization.
-- [ ] Explain why Workspace repeats access enforcement.
-- [ ] Explain why synchronous execution simplifies ordering and cancellation.
-- [ ] Explain why Agent, not Executor, owns multiple-call source order.
+- [x] Add registry, authorization, and dispatch sequence diagrams.
+- [x] Explain why omission from model schemas is usability, not authorization.
+- [x] Explain why adapters never receive the authenticated Handle.
+- [x] Explain why Workspace repeats access enforcement.
+- [x] Explain why synchronous execution simplifies ordering and cancellation.
+- [x] Explain why Agent, not Executor, owns multiple-call source order.
 
 ### Phase Complete When
 
-- [ ] Every submitted valid Call receives one paired bounded Result.
-- [ ] Pre-dispatch rejections cannot reach Workspace.
-- [ ] Authority can only decrease from Context through Workspace operation access.
-- [ ] Unexpected mutating failures are never reported as known not-applied without
+- [x] Every submitted valid Call receives one paired bounded Result.
+- [x] Pre-dispatch rejections cannot reach Workspace.
+- [x] Authority can only decrease from Context through Executor-private Workspace
+  operation access; adapters cannot reconstruct or invoke broader authority.
+- [x] Unexpected mutating failures are never reported as known not-applied without
   proof.
 
 ## Phase 4: Bounded Presentation And Failure Mapping
 
 ### Presentation
 
-- [ ] Implement deterministic key-ordered JSON output.
-- [ ] Account for all JSON quotes, separators, escaping, replacement characters,
+- [x] Implement deterministic key-ordered JSON output.
+- [x] Account for all JSON quotes, separators, escaping, replacement characters,
   and fixed envelope bytes.
-- [ ] Keep every completed content string valid UTF-8 and valid JSON.
-- [ ] Build under a byte budget rather than encoding unbounded data then slicing.
-- [ ] Implement structural truncation for line lists, line text, diffs, and process
+- [x] Keep every completed content string valid UTF-8 and valid JSON.
+- [x] Build under a byte budget rather than encoding unbounded evidence then slicing
+  a completed JSON document.
+- [x] Implement structural truncation for line lists, line text, diffs, and process
   output.
-- [ ] Distinguish Workspace truncation from Tool presentation truncation.
-- [ ] Preserve required revisions and continuation fields even when optional
+- [x] Distinguish Workspace truncation from Tool presentation truncation, including
+  a separate per-line presentation flag.
+- [x] Preserve required revisions and continuation fields even when optional
   evidence is clipped.
-- [ ] Add a bounded fallback for unexpected presentation failure without exposing
+- [x] Use an outcome-preserving bounded fallback when mandatory identity fields
+  cannot fit a caller-lowered result limit.
+- [x] Add a bounded fallback for unexpected presentation failure without exposing
   exceptions.
 
 ### Workspace Errors
 
-- [ ] Map `outcome: :unknown` only to Tool `:ambiguous`.
-- [ ] Map all known Workspace outcomes to ordinary Tool error.
-- [ ] Preserve stable kind, reason, fixed message, normalized relative path, and
+- [x] Map `outcome: :unknown` only to Tool `:ambiguous`.
+- [x] Map all known Workspace outcomes to ordinary Tool error.
+- [x] Preserve stable kind, reason, fixed message, normalized relative path, and
   allowlisted safe details.
-- [ ] Do not copy Workspace operation ID into model-visible output.
-- [ ] Do not copy arbitrary details, exception messages, backend state, or raw
+- [x] Emit `kind: "workspace"` and a separate stable `workspace_kind` category.
+- [x] Copy only non-negative allowlisted numeric details in fixed key order.
+- [x] Do not copy Workspace operation ID into model-visible output.
+- [x] Do not copy arbitrary details, Workspace messages, exception messages,
+  backend state, or raw
   inspection output.
-- [ ] Preserve stale revision, expected missing, no match, multiple matches,
+- [x] Preserve stale revision, expected missing, no match, multiple matches,
   access denial, cancellation, deadline, and output-limit distinctions.
 
 ### Process Output
 
-- [ ] Replace invalid UTF-8 sequences deterministically.
-- [ ] Escape terminal control data through model-visible JSON.
-- [ ] Retain raw byte count separately from presented UTF-8 bytes.
-- [ ] Never log raw or converted process output.
-- [ ] Document that Tool does not and cannot guarantee secret removal from output.
+- [x] Replace invalid UTF-8 sequences deterministically.
+- [x] Escape C0 controls, quotes, backslashes, and DEL through model-visible JSON.
+- [x] Retain raw byte count separately from presented UTF-8 bytes.
+- [x] Never log raw or converted process output.
+- [x] Document that Tool does not and cannot guarantee secret removal from output.
 
 ### Tests
 
-- [ ] Empty, exact-limit, and one-byte-over content.
-- [ ] Worst-case JSON escaping with quotes, slashes, controls, and multibyte UTF-8.
-- [ ] Invalid process UTF-8 split at every replacement boundary.
-- [ ] Broad lines, one huge line, many tiny lines, large diff, and large output.
-- [ ] Valid JSON under every truncation path.
-- [ ] Required identity and revision fields survive presentation pressure.
-- [ ] Every Workspace error kind/reason/outcome mapping used by built-ins.
-- [ ] Synthetic exception text absent from Results and Logger output.
-- [ ] Recognizable synthetic credentials absent unless intentionally supplied as
+- [x] Empty, exact-limit, and one-byte-over content.
+- [x] Worst-case JSON escaping with quotes, slashes, controls, DEL, and multibyte
+  UTF-8.
+- [x] Invalid process UTF-8 split at every replacement boundary.
+- [x] Broad lines, one huge line, many tiny lines, large diff, and large output.
+- [x] Valid JSON under every truncation and mandatory-field fallback path.
+- [x] Required identity and revision fields survive presentation pressure whenever
+  the mandatory envelope fits; otherwise the fixed fallback is explicit.
+- [x] Every Workspace error kind/reason/outcome mapping used by built-ins.
+- [x] Synthetic exception and Workspace message text absent from Results and
+  Logger output.
+- [x] Recognizable synthetic credentials absent unless intentionally supplied as
   Workspace read/process result content.
 
 ### Documentation And Learning
 
-- [ ] Add result envelope examples for success, error, and ambiguity.
-- [ ] Explain raw bytes, valid UTF-8, JSON escaping, and model-visible bytes.
-- [ ] Explain why presentation clipping after natural exit differs from stopping a
+- [x] Add result envelope examples for success, error, and ambiguity.
+- [x] Explain raw bytes, valid UTF-8, JSON escaping, and model-visible bytes.
+- [x] Explain why presentation clipping after natural exit differs from stopping a
   running Bash command at its output ceiling.
-- [ ] Explain what redaction can and cannot guarantee.
+- [x] Explain what redaction can and cannot guarantee.
 
 ### Phase Complete When
 
-- [ ] No model-visible Tool output can exceed the configured final byte ceiling.
-- [ ] No truncation path produces malformed UTF-8 or JSON.
-- [ ] Workspace uncertainty is preserved mechanically.
-- [ ] No raw exception, environment, Handle, absolute root, or backend state can
+- [x] No model-visible Tool output can exceed the configured final byte ceiling.
+- [x] No truncation path produces malformed UTF-8 or JSON.
+- [x] Workspace uncertainty is preserved mechanically.
+- [x] No raw exception, environment, Handle, absolute root, or backend state can
   enter generated diagnostics.
 
 ## Phase 5: Read Tool
 
 ### Arguments And Mapping
 
-- [ ] Require exact fields `path`, `offset`, and `limit`.
-- [ ] Require relative UTF-8 path and reject invalid values before Workspace.
-- [ ] Normalize `offset: null` to zero and `limit: null` to the trusted default.
-- [ ] Reject negative offset, zero limit, overflow in `offset + 1`, and limits above
+- [x] Require exact fields `path`, `offset`, and `limit`.
+- [x] Require relative UTF-8 path and reject invalid values before Workspace.
+- [x] Normalize `offset: null` to zero and `limit: null` to the trusted default.
+- [x] Reject negative offset, zero limit, overflow in `offset + 1`, and limits above
   Tool or Workspace ceilings.
-- [ ] Map `start_line = offset + 1` and `line_count = limit`.
-- [ ] Select a trusted `max_bytes` no higher than Workspace or Tool limits.
-- [ ] Derive read-only Workspace Access.
-- [ ] Call only `Workspace.read/3`.
+- [x] Map `start_line = offset + 1` and `line_count = limit`.
+- [x] Select a trusted `max_bytes` no higher than Workspace or Tool limits.
+- [x] Derive read-only Workspace Access.
+- [x] Let only the static Dispatcher call `Workspace.read/3` for a ReadRequest.
 
 ### Result
 
-- [ ] Return normalized relative path and canonical encoded revision.
-- [ ] Return explicit line number, text, ending, and source truncation per line.
-- [ ] Return `next_offset` or null at EOF.
-- [ ] Return complete file byte count and presentation truncation state.
-- [ ] Preserve direct line numbers to reduce model arithmetic and cognitive load.
-- [ ] Never expose absolute root or internal revision representation.
+- [x] Return normalized relative path and canonical encoded revision.
+- [x] Return explicit line number, text, ending, and source truncation per line.
+- [x] Return `next_offset` or null at EOF.
+- [x] Return complete file byte count and presentation truncation state.
+- [x] Preserve direct line numbers to reduce model arithmetic and cognitive load.
+- [x] Never expose absolute root or internal revision representation.
 
 ### Tests With Fake Workspace
 
-- [ ] Exact default request and read-only Context.
-- [ ] Zero and non-zero offsets.
-- [ ] Lowered and maximum line limits.
-- [ ] Empty file, EOF, LF, CRLF, mixed ending, and no final newline.
-- [ ] Workspace-clipped long line and Tool presentation-clipped line.
-- [ ] Dropped trailing lines update continuation to the first omitted line.
-- [ ] Revision encoding and later parse compatibility.
-- [ ] Invalid path, denied capability, Workspace denial, cancellation, and deadline.
-- [ ] No Workspace entry consumed for invalid arguments or missing capability.
+- [x] Exact default request and read-only Context.
+- [x] Zero and non-zero offsets, including the largest non-overflowing offset.
+- [x] Lowered and maximum line limits.
+- [x] Empty file, EOF, LF, CRLF, mixed ending, and no final newline.
+- [x] Workspace-clipped long line and Tool presentation-clipped line independently.
+- [x] Dropped trailing lines update continuation to the first omitted line.
+- [x] Revision encoding and later parse compatibility.
+- [x] Invalid path, denied capability, Workspace denial, cancellation, and deadline.
+- [x] No Workspace entry consumed for invalid arguments or missing capability.
 
 ### Real Workspace Integration
 
-- [ ] Read a synthetic temporary text file through Tool Executor.
-- [ ] Confirm numbered lines, revision, continuation, and bounded content.
-- [ ] Confirm traversal, symlink, non-regular, invalid UTF-8, and oversized-file
+- [x] Read a synthetic temporary text file through Tool Executor.
+- [x] Confirm numbered lines, revision, continuation, and bounded content.
+- [x] Confirm traversal, symlink, non-regular, invalid UTF-8, and oversized-file
   failures remain structured Tool errors.
-- [ ] Confirm Tool source calls no File API directly.
+- [x] Confirm Tool production source calls no host File, System, Port, `:file`, or
+  MuonTrap API directly, and only static Dispatcher calls Workspace operations.
 
 ### Documentation And Learning
 
-- [ ] Explain zero-based Tool offset versus one-based Workspace lines.
-- [ ] Add examples for first window, continuation, EOF, and clipped line.
-- [ ] Explain why 100 lines is the default ACI window.
-- [ ] Explain why every mutation must use the returned revision.
+- [x] Explain zero-based Tool offset versus one-based Workspace lines.
+- [x] Add examples for first window, continuation, EOF, and clipped line.
+- [x] Explain why 100 lines is the default ACI window.
+- [x] Explain why every mutation must use the returned revision.
 
 ### Phase Complete When
 
-- [ ] Every Read call is bounded, numbered, revisioned, and directly continuable.
-- [ ] Fake proves exact Workspace delegation without host access.
-- [ ] Real temporary-root tests prove the complete adapter boundary.
-- [ ] Model-visible output contains no absolute root.
+- [x] Every Read call is bounded, numbered, revisioned, and directly continuable.
+- [x] Fake proves exact Workspace delegation without host access.
+- [x] Real temporary-root tests prove the complete adapter boundary.
+- [x] Model-visible output contains no absolute root.
 
 ## Phase 6: Write Tool
 
 ### Arguments And Mapping
 
-- [ ] Require exact fields `path`, `content`, and `expected_revision`.
-- [ ] Validate aggregate argument bytes before retaining or dispatching content.
-- [ ] Map exact `"missing"` to Workspace `:missing`.
-- [ ] Parse all other expectations through `Workspace.Revision.parse/1`.
-- [ ] Reject malformed revisions before Workspace without claiming stale state.
-- [ ] Build a WriteRequest with complete UTF-8 content.
-- [ ] Derive write-only Workspace Access.
-- [ ] Call only `Workspace.write/3`.
-- [ ] Provide no blind-overwrite, append, directory creation, or automatic retry.
+- [x] Require exact fields `path`, `content`, and `expected_revision`.
+- [x] Validate aggregate argument bytes before retaining or dispatching content.
+- [x] Map exact `"missing"` to Workspace `:missing`.
+- [x] Parse all other expectations through `Workspace.Revision.parse/1`.
+- [x] Reject malformed revisions before Workspace without claiming stale state.
+- [x] Build a WriteRequest with complete UTF-8 content.
+- [x] Derive write-only Workspace Access.
+- [x] Let only the static Dispatcher call `Workspace.write/3` for a WriteRequest.
+- [x] Map a typed request above an opened Workspace file ceiling to paired
+  `invalid_arguments` before backend dispatch, not `internal_error`.
+- [x] Provide no blind-overwrite, append, directory creation, or automatic retry.
 
 ### Result
 
-- [ ] Return relative path, previous revision, new revision, changed, bytes written,
+- [x] Return relative path, previous revision, new revision, changed, bytes written,
   diff, Workspace diff truncation, and Tool presentation truncation.
-- [ ] Encode creation previous revision as `"missing"`.
-- [ ] Preserve no-op replacement as successful `changed: false`.
-- [ ] Preserve stale, expected-existing, denied, limit, I/O, and ambiguity reasons.
-- [ ] Tell the model to reread after stale conflict rather than retry old content.
+- [x] Encode creation previous revision as `"missing"`.
+- [x] Preserve no-op replacement as successful `changed: false`.
+- [x] Preserve stale, expected-existing, denied, limit, I/O, and ambiguity reasons.
+- [x] Tell the model to reread after stale conflict rather than retry old content.
 
 ### Tests With Fake Workspace
 
-- [ ] Missing-file creation exact request and result.
-- [ ] Existing-file replacement with parsed revision.
-- [ ] Malformed, stale, cross-handle, and wrong-path revision behavior.
-- [ ] Existing destination under `"missing"` expectation.
-- [ ] Empty content, maximum argument envelope, and one byte beyond.
-- [ ] No-op replacement.
-- [ ] Workspace diff truncation and Tool presentation truncation.
-- [ ] Denied capability and defense-in-depth Workspace access denial.
-- [ ] Known not-applied error and ambiguous error.
-- [ ] Callback crash/malformed return conservative ambiguity.
-- [ ] No hidden replay under any failure.
+- [x] Missing-file creation exact request and result.
+- [x] Existing-file replacement with parsed revision.
+- [x] Malformed, stale, cross-handle, and wrong-path revision behavior through Fake
+  classifications and Real semantic checks.
+- [x] Existing destination under `"missing"` expectation.
+- [x] Empty content, maximum argument envelope, and one byte beyond.
+- [x] No-op replacement.
+- [x] Workspace diff truncation and Tool presentation truncation.
+- [x] Denied capability and defense-in-depth Workspace access denial.
+- [x] Known not-applied, Workspace limit, I/O, and ambiguous errors.
+- [x] Prepare failure is pre-dispatch; dispatch failure is conservative ambiguity;
+  presentation failure preserves the retained mutation outcome.
+- [x] Crashing and malformed backend dispatch is invoked once and returns ambiguity
+  with inspect-before-retry guidance.
+- [x] No hidden replay under any failure.
 
 ### Real Workspace Integration
 
-- [ ] Create a synthetic missing file through Tool Executor.
-- [ ] Read its revision and replace it through Tool Executor.
-- [ ] Verify stale replacement does not alter the file.
-- [ ] Verify failed validation leaves original content unchanged.
-- [ ] Verify successful output carries the committed revision.
-- [ ] Confirm Tool source calls no File API directly.
+- [x] Create a synthetic missing file through Tool Executor.
+- [x] Read its revision and replace it through Tool Executor.
+- [x] Verify stale, cross-handle, and wrong-path replacement does not alter files.
+- [x] Verify failed validation and expected-missing conflict leave original content
+  unchanged.
+- [x] Verify successful output carries the committed revision.
+- [x] Verify creation beneath a missing parent creates neither directory nor file.
+- [x] Confirm Tool source calls no File API directly.
 
 ### Documentation And Learning
 
-- [ ] Add create and revision-checked replace examples.
-- [ ] Explain why `"missing"` is an expectation, not overwrite permission.
-- [ ] Explain stale, not-applied, committed, and ambiguous outcomes.
-- [ ] Explain why Tool never retries a Write automatically.
+- [x] Add create and revision-checked replace examples.
+- [x] Explain why `"missing"` is an expectation, not overwrite permission.
+- [x] Explain stale, not-applied, committed, and ambiguous outcomes.
+- [x] Explain why Tool never retries a Write automatically.
 
 ### Phase Complete When
 
-- [ ] Write supports only explicit create or current-revision replacement.
-- [ ] Every successful result exposes the new revision and bounded diff evidence.
-- [ ] Every uncertain outcome remains ambiguous.
-- [ ] Fake and Real adapter tests pass.
+- [x] Write supports only explicit create or current-revision replacement.
+- [x] Every successful result exposes the new revision and bounded diff evidence.
+- [x] Every uncertain outcome remains ambiguous.
+- [x] Fake and Real adapter tests pass.
 
 ## Phase 7: Edit Tool
 
 ### Arguments And Mapping
 
-- [ ] Require exact fields `path`, `old_text`, `new_text`, and
+- [x] Require exact fields `path`, `old_text`, `new_text`, and
   `expected_revision`.
-- [ ] Require non-empty old text and permit empty new text.
-- [ ] Validate aggregate argument bytes and UTF-8.
-- [ ] Parse only canonical `wsr1` revisions; `"missing"` is invalid for Edit.
-- [ ] Build one exact EditRequest without regex, fuzzy matching, or patch parsing.
-- [ ] Derive write-only Workspace Access.
-- [ ] Call only `Workspace.edit/3`.
+- [x] Require non-empty old text and permit empty new text.
+- [x] Validate aggregate argument bytes and UTF-8.
+- [x] Parse only canonical `wsr1` revisions; `"missing"` is invalid for Edit.
+- [x] Build one exact EditRequest without regex, fuzzy matching, or patch parsing.
+- [x] Derive write-only Workspace Access.
+- [x] Let only the static Dispatcher call `Workspace.edit/3` for an EditRequest.
 
 ### Result And Failure
 
-- [ ] Return the same mutation evidence shape as Write.
-- [ ] Preserve exactly-one-match semantics including overlapping matches.
-- [ ] Preserve Workspace revision validation before match disclosure.
-- [ ] Distinguish zero match, multiple matches, stale revision, and size failure.
-- [ ] Preserve equal old/new exact-one match as successful no-op.
-- [ ] Preserve post-dispatch uncertainty as ambiguous.
-- [ ] Do not automatically reread, merge, rebase, or retry.
+- [x] Return the same mutation evidence shape as Write.
+- [x] Preserve exactly-one-match semantics including overlapping matches.
+- [x] Preserve Workspace revision validation before match disclosure.
+- [x] Distinguish zero match, multiple matches, stale revision, and size failure.
+- [x] Preserve equal old/new exact-one match as successful no-op.
+- [x] Preserve post-dispatch uncertainty as ambiguous.
+- [x] Do not automatically reread, merge, rebase, or retry.
 
 ### Tests With Fake Workspace
 
-- [ ] Exactly one match and changed result.
-- [ ] Zero matches.
-- [ ] Multiple and overlapping matches.
-- [ ] Empty old text and empty new text.
-- [ ] Equal old/new no-op.
-- [ ] Malformed and stale revision.
-- [ ] Generated content too large.
-- [ ] Bounded diff and both truncation layers.
-- [ ] Denied capability and Workspace access denial.
-- [ ] Known not-applied versus ambiguous error.
-- [ ] Callback crash/malformed return conservative ambiguity.
+- [x] Exactly one match and changed result.
+- [x] Zero matches.
+- [x] Multiple and overlapping matches.
+- [x] Empty old text and empty new text.
+- [x] Equal old/new no-op.
+- [x] Malformed and stale revision.
+- [x] Generated content too large.
+- [x] Bounded diff and both truncation layers.
+- [x] Denied capability and Workspace access denial.
+- [x] Known not-applied versus ambiguous error.
+- [x] Prepare failure is pre-dispatch; dispatch failure is conservative ambiguity;
+  presentation failure preserves the retained mutation outcome.
 
 ### Real Workspace Integration
 
-- [ ] Read then edit one exact synthetic occurrence.
-- [ ] Verify zero and multiple matches leave original unchanged.
-- [ ] Verify stale edit leaves newer content unchanged.
-- [ ] Verify successful output revision can drive a later edit.
-- [ ] Confirm Tool source calls no File API directly.
+- [x] Read then edit one exact synthetic occurrence.
+- [x] Verify zero and multiple matches leave original unchanged.
+- [x] Verify stale edit leaves newer content unchanged.
+- [x] Verify successful output revision can drive a later edit.
+- [x] Confirm Tool source calls no File API directly.
 
 ### Documentation And Learning
 
-- [ ] Add read-to-edit revision round-trip example.
-- [ ] Explain literal exact matching and overlapping occurrence behavior.
-- [ ] Explain why stale conflict is checked before match count.
-- [ ] Explain why fuzzy edit and automatic stale merge are deferred.
+- [x] Add read-to-edit revision round-trip example.
+- [x] Explain literal exact matching and overlapping occurrence behavior.
+- [x] Explain why stale conflict is checked before match count.
+- [x] Explain why fuzzy edit and automatic stale merge are deferred.
 
 ### Phase Complete When
 
-- [ ] Edit performs exactly one revision-checked literal replacement or none.
-- [ ] No conflict path silently changes a file.
-- [ ] Every known and uncertain outcome is mapped correctly.
-- [ ] Fake and Real adapter tests pass.
+- [x] Edit performs exactly one revision-checked literal replacement or none.
+- [x] No conflict path silently changes a file.
+- [x] Every known and uncertain outcome is mapped correctly.
+- [x] Fake and Real adapter tests pass.
 
 ## Phase 8: Bash Tool
 
 ### Arguments And Mapping
 
-- [ ] Require exact fields `command` and `timeout_ms`.
-- [ ] Require non-empty bounded UTF-8 command without NUL.
-- [ ] Normalize `timeout_ms: null` to trusted default.
-- [ ] Permit only a lower positive timeout within Tool and Workspace ceilings.
-- [ ] Build exact executable `/bin/bash` and arguments `["-lc", command]`.
-- [ ] Set cwd to `.`, trusted inactivity/output limits, and `mutation: :unknown`.
-- [ ] Derive exec-only Workspace Access.
-- [ ] Pass a synchronous sink that accepts bounded events without logging payloads.
-- [ ] Call only `Workspace.run/4`.
-- [ ] Do not expose executable, argv, cwd, environment, stdin, mutation class,
+- [x] Require exact fields `command` and `timeout_ms`.
+- [x] Require non-empty bounded UTF-8 command without NUL.
+- [x] Normalize `timeout_ms: null` to trusted default.
+- [x] Permit only a lower positive timeout within Tool and Workspace ceilings.
+- [x] Build exact executable `/bin/bash` and arguments `["-lc", command]`.
+- [x] Set cwd to `.`, trusted inactivity/output limits, and `mutation: :unknown`.
+- [x] Derive exec-only Workspace Access.
+- [x] Pass a synchronous sink that accepts bounded events without logging payloads.
+- [x] Let only the static Dispatcher call `Workspace.run/4` for a fixed ProcessSpec.
+- [x] Do not expose executable, argv, cwd, environment, stdin, mutation class,
   secret injection, or background-process controls to model arguments.
 
 ### Result And Failure
 
-- [ ] Map natural exit zero to Tool success.
-- [ ] Map natural non-zero exit to Tool error with known process evidence.
-- [ ] Preserve exit code, elapsed time, raw output bytes, Workspace truncation, and
+- [x] Map natural exit zero to Tool success.
+- [x] Map natural non-zero exit to Tool error with known process evidence.
+- [x] Preserve exit code, elapsed time, raw output bytes, Workspace truncation, and
   Tool presentation truncation.
-- [ ] Map pre-start cancellation/deadline/start failure according to Workspace
+- [x] Map pre-start cancellation/deadline/start failure according to Workspace
   known outcome.
-- [ ] Map every forced stop after unknown-footprint start to ambiguous.
-- [ ] Preserve inactivity, timeout, output limit, sink failure, runner failure,
+- [x] Map every forced stop after unknown-footprint start to ambiguous.
+- [x] Preserve inactivity, timeout, output limit, sink failure, runner failure,
   owner death, and backend failure classifications where safely available.
-- [ ] Never retry Bash automatically.
+- [x] Never retry Bash automatically.
 
 ### Tests With Fake Workspace
 
-- [ ] Exact ProcessSpec including `/bin/bash`, `-lc`, `.`, and `:unknown`.
-- [ ] Default, lowered, maximum, and invalid timeout.
-- [ ] Empty, NUL-containing, exact-limit, and oversized command.
-- [ ] Started/output event acceptance without content logging.
-- [ ] Exit zero and natural non-zero exit.
-- [ ] Empty, multiline, binary-invalid, control-containing, and large output.
-- [ ] Pre-start cancellation and deadline.
-- [ ] Post-start cancellation, timeout, inactivity, output limit, sink failure, and
+- [x] Exact ProcessSpec including `/bin/bash`, `-lc`, `.`, and `:unknown`.
+- [x] Default, lowered, maximum, and invalid timeout.
+- [x] Empty, NUL-containing, exact-limit, and oversized command.
+- [x] Started/output event acceptance without content logging.
+- [x] Exit zero and natural non-zero exit.
+- [x] Empty, multiline, binary-invalid, control-containing, and large output.
+- [x] Pre-start cancellation and deadline.
+- [x] Post-start cancellation, timeout, inactivity, output limit, sink failure, and
   runner failure as ambiguous.
-- [ ] Result/event operation identity correlation through Workspace facade.
-- [ ] Denied capability and Workspace exec denial.
-- [ ] Callback crash/malformed return conservative ambiguity.
-- [ ] No Fake script replay.
+- [x] Result/event operation identity correlation through Workspace facade.
+- [x] Denied capability and Workspace exec denial.
+- [x] Prepare failure is pre-dispatch; dispatch failure is conservative ambiguity;
+  presentation failure preserves the retained process outcome.
+- [x] No Fake script replay.
 
 ### Real Workspace Integration
 
-- [ ] Run a harmless command in a synthetic temporary root.
-- [ ] Verify cwd without exposing the absolute path in generated metadata.
-- [ ] Verify exit zero, non-zero, output, and elapsed evidence.
-- [ ] Verify synthetic provider/cloud/GitHub/SSH environment values are absent.
-- [ ] Verify cancellation and timeout clean the owned direct command on the
+- [x] Run a harmless command in a synthetic temporary root.
+- [x] Verify cwd without exposing the absolute path in generated metadata.
+- [x] Verify exit zero, non-zero, output, and elapsed evidence.
+- [x] Verify synthetic provider/cloud/GitHub/SSH environment values are absent.
+- [x] Verify cancellation and timeout clean the owned direct command on the
   supported platform.
-- [ ] Verify unknown-footprint forced stop returns ambiguous.
-- [ ] Confirm Tool source calls no System, Port, MuonTrap, or File API directly.
+- [x] Verify unknown-footprint forced stop returns ambiguous.
+- [x] Confirm Tool source calls no System, Port, MuonTrap, or File API directly.
 
 ### Documentation And Learning
 
-- [ ] Add success, non-zero, cancellation, and ambiguity examples.
-- [ ] Explain why Bash explicitly uses a shell while Workspace uses separated argv.
-- [ ] Explain why model-facing Bash always declares unknown mutation footprint.
-- [ ] Explain same-user filesystem/network authority and descendant limitations.
-- [ ] Explain raw-output and model-visible presentation bounds.
-- [ ] Explain why generic Bash receives no secrets.
+- [x] Add success, non-zero, cancellation, and ambiguity examples.
+- [x] Explain why Bash explicitly uses a shell while Workspace uses separated argv.
+- [x] Explain why model-facing Bash always declares unknown mutation footprint.
+- [x] Explain same-user filesystem/network authority and descendant limitations.
+- [x] Explain raw-output and model-visible presentation bounds.
+- [x] Explain why generic Bash receives no secrets.
 
 ### Phase Complete When
 
-- [ ] Model input cannot alter trusted process policy outside command and lowered
+- [x] Model input cannot alter trusted process policy outside command and lowered
   timeout.
-- [ ] Known exits and uncertain forced stops are never conflated.
-- [ ] Child output and environment are bounded and never logged by Tool.
-- [ ] Fake and supported-platform Real adapter tests pass.
+- [x] Known exits and uncertain forced stops are never conflated.
+- [x] Child output and environment are bounded and never logged by Tool.
+- [x] Fake and supported-platform Real adapter tests pass.
 
 ## Phase 9: Deterministic Integration And Live Schema Acceptance
 
 ### Provider To Tool Integration
 
-- [ ] Build one successful Provider Response containing each FunctionCall shape.
-- [ ] Convert complete FunctionCall output items to Tool Calls.
-- [ ] Prove Provider output-item ID remains in Agent-side fixture data only.
-- [ ] Execute each Tool Call through Executor and Fake Workspace.
-- [ ] Project each Result content into a matching `function_call_output` fixture.
-- [ ] Preserve exact call IDs through Provider call, Tool Result, and continuation.
-- [ ] Never execute calls from a failed, interrupted, or incomplete Provider turn.
+- [x] Build one successful Provider Response containing each FunctionCall shape.
+- [x] Convert complete FunctionCall output items to Tool Calls.
+- [x] Prove Provider output-item ID remains in Agent-side fixture data only.
+- [x] Execute each Tool Call through Executor and Fake Workspace.
+- [x] Project each Result content into a matching `function_call_output` fixture.
+- [x] Preserve exact call IDs through Provider call, Tool Result, and continuation.
+- [x] Never execute calls from a failed, interrupted, or incomplete Provider turn.
 
 ### Multi-Operation Scenario
 
-- [ ] Script `read -> write -> bash` through Fake Workspace.
-- [ ] Script `read -> edit -> bash` through Fake Workspace.
-- [ ] Invoke Executor sequentially in source order from a test harness.
-- [ ] Assert exact request/context/result order and Fake script exhaustion.
-- [ ] Assert unknown, invalid, denied, and ordinary failed calls remain pairable.
-- [ ] Assert ambiguity prevents admission of later operations in the integration
+- [x] Script `read -> write -> bash` through Fake Workspace.
+- [x] Script `read -> edit -> bash` through Fake Workspace.
+- [x] Invoke Executor sequentially in source order from a test harness.
+- [x] Assert exact request/context/result order and Fake script exhaustion.
+- [x] Assert unknown, invalid, denied, and ordinary failed calls remain pairable.
+- [x] Assert ambiguity prevents admission of later operations in the integration
   harness without pretending a complete Agent Loop exists.
 
 ### Live Tokamak Schema Test
 
-- [ ] Mark the test `:live_tokamak` and exclude it by default.
-- [ ] Require runtime `TOKAMAK_API_KEY` and `SYNAPSE_MODEL`.
-- [ ] Send one request exposing all four exact registry specifications.
-- [ ] Ask for one harmless function call but do not execute it against a real root.
-- [ ] Receive a successful terminal Provider Response.
-- [ ] Confirm the returned name is statically registered and arguments form a
+- [x] Mark the test `:live_tokamak` and exclude it by default.
+- [x] Require runtime `TOKAMAK_API_KEY` and `SYNAPSE_MODEL`.
+- [x] Send one request exposing all four exact registry specifications.
+- [x] Ask for one harmless function call but do not execute it against a real root.
+- [x] Receive a successful terminal Provider Response.
+- [x] Confirm the returned name is statically registered and arguments form a
   bounded string-keyed map.
-- [ ] Store no live body, identifier, prompt output, or credential in fixtures.
-- [ ] Keep ordinary Tool tests network- and credential-free.
+- [x] Store no live body, identifier, prompt output, or credential in fixtures.
+- [x] Keep ordinary Tool tests network- and credential-free.
 
 ### Boundary Audits
 
-- [ ] Static search confirms Tool modules call no File, System, Port, MuonTrap, Req,
+- [x] Static search confirms Tool modules call no File, System, Port, MuonTrap, Req,
   Agent, Runtime, or CLI APIs.
-- [ ] Every host operation in adapter tests appears as one expected Fake Workspace
+- [x] Every deterministic adapter operation appears as one expected Fake Workspace
   entry.
-- [ ] Real tests use only synthetic temporary roots and commands.
-- [ ] No test depends on call order across concurrent senders or wall-clock sleeps.
+- [x] Real tests use only synthetic temporary roots and commands.
+- [x] No deterministic integration test depends on concurrent-sender order or
+  wall-clock sleeps; lifecycle Real tests poll bounded observable conditions.
 
 ### Documentation And Learning
 
-- [ ] Add complete Provider-call-to-continuation sequence diagram.
-- [ ] Explain what this integration proves and what remains for Agent Loop.
-- [ ] Explain why successful ToolCallCompleted progress is still insufficient until
+- [x] Add complete Provider-call-to-continuation sequence diagram.
+- [x] Explain what this integration proves and what remains for Agent Loop.
+- [x] Explain why successful ToolCallCompleted progress is still insufficient until
   Provider returns a successful terminal Response.
-- [ ] Explain why live schema acceptance does not prove Workspace safety.
+- [x] Explain why live schema acceptance does not prove Workspace safety.
 
 ### Phase Complete When
 
-- [ ] Every built-in executes deterministically through a Fake Workspace.
-- [ ] Every submitted call has a matching Result and continuation call ID.
-- [ ] All four exact schemas are accepted by the Tokamak Codex pool.
-- [ ] No incomplete or failed Provider call is executable.
-- [ ] Tool System has no direct host-access bypass.
+- [x] Every built-in executes deterministically through a Fake Workspace.
+- [x] Every submitted call has a matching Result and continuation call ID.
+- [x] All four exact schemas are accepted by the Tokamak Codex pool.
+- [x] No incomplete or failed Provider call is executable.
+- [x] Tool System has no direct host-access bypass.
 
 ## Phase 10: Reliability, Security, And ExDoc Review
 
 ### Limits And Failure Injection
 
-- [ ] Bound every Call, argument, schema, registry, Context, Result, metadata,
+- [x] Bound every Call, argument, schema, registry, Context, Result, metadata,
   diagnostic, line list, diff, command, process output, and timeout.
-- [ ] Reject integer overflow and unreasonable trusted limits.
-- [ ] Inject unknown name, denied capability, validator failure, Workspace error,
+- [x] Reject integer overflow and unreasonable trusted limits.
+- [x] Inject unknown name, denied capability, validator failure, Workspace error,
   callback exception/throw/exit, malformed Result, and presentation failure.
-- [ ] Inject failures before dispatch, during Workspace operation, and after a
+- [x] Inject failures before dispatch, during Workspace operation, and after a
   trustworthy terminal result.
-- [ ] Prove not-applied versus ambiguous classification for every mutating stage.
-- [ ] Stress many unique unknown names without atom growth.
-- [ ] Stress repeated large calls and Results without retained state growth.
-- [ ] Confirm Executor starts no process, queue, ETS table, or global registry.
+- [x] Prove not-applied versus ambiguous classification for every mutating stage.
+- [x] Stress many unique unknown names without atom growth.
+- [x] Stress repeated large calls and Results without retained state growth.
+- [x] Confirm Executor starts no process, queue, ETS table, or global registry.
 
 ### Security Review
 
-- [ ] Search Tool structs for raw roots, environments, Ports, backend state, and
+- [x] Search Tool structs for raw roots, environments, Ports, backend state, and
   credentials.
-- [ ] Search logging and inspection paths for arguments, file content, command,
+- [x] Search logging and inspection paths for arguments, file content, command,
   output, Handle, operation ID, metadata, and exception text.
-- [ ] Test redaction with recognizable synthetic credentials and paths.
-- [ ] Confirm output intentionally returned by Workspace remains model-visible and
+- [x] Test redaction with recognizable synthetic credentials and paths.
+- [x] Confirm output intentionally returned by Workspace remains model-visible and
   is not falsely described as secret-free.
-- [ ] Confirm no model input creates atoms, modules, functions, executable paths,
-  capability values, or Workspace authority.
-- [ ] Confirm Bash is documented as same-user ambient authority, not a sandbox.
-- [ ] Confirm unsupported dynamic or security behavior fails closed.
-- [ ] Confirm generic Bash has no credential-injection path.
+- [x] Confirm no model input creates atoms, modules, dispatch functions, the fixed
+  `ProcessSpec.executable`/argv structure, capability values, or Workspace
+  authority. Bash shell source retains documented same-user ambient execution.
+- [x] Confirm Bash is documented as same-user ambient authority, not a sandbox.
+- [x] Confirm unsupported dynamic or security behavior fails closed.
+- [x] Confirm generic Bash has no credential-injection path.
 
 ### Documentation
 
-- [ ] Every public Tool module has `@moduledoc`.
-- [ ] Every public function and callback has purpose-oriented `@doc` and `@spec`.
-- [ ] Every public struct has `t()` and documented ownership of each field.
-- [ ] Add Tool modules to ExDoc groups.
-- [ ] Add `docs/learning/TOOL-SYSTEM.md` as a complete maintenance guide.
-- [ ] Add boundary, registry, capability, read-revision, mutation, Bash ambiguity,
+- [x] Every public Tool module has `@moduledoc`.
+- [x] Every public function and callback has purpose-oriented `@doc` and `@spec`.
+- [x] Every public struct has `t()` and documented ownership of each field.
+- [x] Add Tool modules to ExDoc groups.
+- [x] Add `docs/learning/TOOL-SYSTEM.md` as a complete maintenance guide.
+- [x] Add boundary, registry, capability, read-revision, mutation, Bash ambiguity,
   and continuation diagrams.
-- [ ] Add examples for all schemas, Calls, Results, capabilities, every built-in,
+- [x] Add examples for all schemas, Calls, Results, capabilities, every built-in,
   errors, ambiguity, cancellation, and Fake integration.
-- [ ] Update `README.md`, `PLAN.md`, Provider fixtures, and status documentation.
-- [ ] Correct stale namespace or architecture text discovered by the final audit.
-- [ ] Document all capability, output, shell, host-authority, and deferred-feature
+- [x] Update `README.md`, `PLAN.md`, Provider fixtures, and status documentation.
+- [x] Correct stale namespace or architecture text discovered by the final audit.
+- [x] Document all capability, output, shell, host-authority, and deferred-feature
   limitations.
 
 ### Comprehension Gate
 
-- [ ] Can the owner explain why Provider progress events do not execute tools?
-- [ ] Can the owner distinguish Provider item ID, call ID, and operation ID?
-- [ ] Can the owner identify where model arguments first become valid Tool input?
-- [ ] Can the owner prove schema and runtime-validator parity?
-- [ ] Can the owner explain why schema omission is not capability enforcement?
-- [ ] Can the owner trace capability reduction into Workspace Access?
-- [ ] Can the owner trace Read offset to Workspace line and back to next offset?
-- [ ] Can the owner trace a revision from Read into Write or Edit?
-- [ ] Can the owner distinguish invalid, denied, failed, and ambiguous calls?
-- [ ] Can the owner explain natural Bash failure versus forced-stop ambiguity?
-- [ ] Can the owner identify exactly which Tool data enters the next Provider
+- [x] Can the owner explain why Provider progress events do not execute tools?
+- [x] Can the owner distinguish Provider item ID, call ID, and operation ID?
+- [x] Can the owner identify where model arguments first become valid Tool input?
+- [x] Can the owner prove schema and runtime-validator parity?
+- [x] Can the owner explain why schema omission is not capability enforcement?
+- [x] Can the owner trace capability reduction into Workspace Access?
+- [x] Can the owner trace Read offset to Workspace line and back to next offset?
+- [x] Can the owner trace a revision from Read into Write or Edit?
+- [x] Can the owner distinguish invalid, denied, failed, and ambiguous calls?
+- [x] Can the owner explain natural Bash failure versus forced-stop ambiguity?
+- [x] Can the owner identify exactly which Tool data enters the next Provider
   request?
-- [ ] Can the owner test every tool without network or host side effects?
-- [ ] Can the owner list all deferred Tool capabilities?
+- [x] Can the owner test every tool without network or host side effects?
+- [x] Can the owner list all deferred Tool capabilities?
 
 ### Phase Complete When
 
-- [ ] Reliability and security tests pass.
-- [ ] No unbounded Tool parser, encoder, accumulator, registry, queue, or retained
+- [x] Reliability and security tests pass.
+- [x] No unbounded Tool parser, encoder, accumulator, registry, queue, or retained
   operation state remains.
-- [ ] No Tool-generated log, inspection, error, fixture, or example exposes a
+- [x] No Tool-generated log, inspection, error, fixture, or example exposes a
   credential, absolute host path, raw content, command, or process output.
-- [ ] Model-visible content is bounded, valid UTF-8 JSON and explicitly treated as
+- [x] Model-visible content is bounded, valid UTF-8 JSON and explicitly treated as
   untrusted evidence.
-- [ ] `mix docs` succeeds without Tool documentation warnings.
-- [ ] All examples and doctests pass.
-- [ ] Tool System can be maintained without the original design conversation.
+- [x] `mix docs` succeeds without Tool documentation warnings.
+- [x] All examples and doctests pass.
+- [x] Tool System can be maintained without the original design conversation.
 
 ## Test Matrix
 
@@ -1306,12 +1388,13 @@ module execution API is part of the MVP.
 | Tokamak schema acceptance | Opt-in live test | HTTPS, no tool execution |
 | ExDoc | Documentation build and doctests | None |
 
-## Suggested Test Layout
+## Current Test Layout
 
 ```text
 test/
-  tool_contract_test.exs
-  tool_spec_test.exs
+  tool_limits_test.exs
+  tool_contracts_test.exs
+  tool_specifications_test.exs
   tool_registry_test.exs
   tool_executor_test.exs
   tool_presentation_test.exs
@@ -1320,14 +1403,8 @@ test/
   tool_edit_test.exs
   tool_bash_test.exs
   tool_integration_test.exs
+  tool_phase10_test.exs
   live_tool_schema_test.exs
-  support/tool_case.ex
-  fixtures/tool/
-    read_result.fixture
-    write_result.fixture
-    edit_result.fixture
-    bash_result.fixture
-    error_result.fixture
 ```
 
 Prefer small readable fixtures and programmatically generated boundary data.
@@ -1375,29 +1452,29 @@ The live test must never execute a returned call against a user checkout.
 
 ## Tool System Definition Of Done
 
-- [ ] Phases 0 through 10 are complete.
-- [ ] Tool System boundary matches `PLAN.md`.
-- [ ] Agent owns successful-response selection, source-order iteration, Run Events,
+- [x] Phases 0 through 10 are complete.
+- [x] Tool System boundary matches `PLAN.md`.
+- [x] Agent owns successful-response selection, source-order iteration, Run Events,
   and conversation continuation.
-- [ ] Executor accepts one complete Call and returns one paired Result.
-- [ ] Provider item ID, call ID, and Workspace operation ID remain distinct.
-- [ ] Registry contains exactly Read, Write, Edit, and Bash in stable order.
-- [ ] Unknown model names cannot create atoms or dispatch arbitrary modules.
-- [ ] Exact schemas are accepted by Tokamak and match runtime validators.
-- [ ] Every capability is trusted application data and checked before dispatch.
-- [ ] Workspace receives an exact reduced Access value for every operation.
-- [ ] All host access delegates only through Workspace.
-- [ ] Read returns bounded numbered lines, revision, and continuation.
-- [ ] Write supports explicit missing creation or current-revision replacement only.
-- [ ] Edit supports exactly one literal current-revision replacement only.
-- [ ] Bash uses fixed shell policy and is documented as same-user execution.
-- [ ] Every model-visible Result is bounded valid UTF-8 JSON.
-- [ ] Natural failures, known not-applied outcomes, and ambiguity remain distinct.
-- [ ] No mutating or unknown-footprint operation is automatically replayed.
-- [ ] Deterministic tests require no live key or real host side effects.
-- [ ] ExDoc explains schemas, registry, capabilities, validation, adapters, output,
+- [x] Executor accepts one complete Call and returns one paired Result.
+- [x] Provider item ID, call ID, and Workspace operation ID remain distinct.
+- [x] Registry contains exactly Read, Write, Edit, and Bash in stable order.
+- [x] Unknown model names cannot create atoms or dispatch arbitrary modules.
+- [x] Exact schemas are accepted by Tokamak and match runtime validators.
+- [x] Every capability is trusted application data and checked before dispatch.
+- [x] Workspace receives an exact reduced Access value for every operation.
+- [x] All host access delegates only through Workspace.
+- [x] Read returns bounded numbered lines, revision, and continuation.
+- [x] Write supports explicit missing creation or current-revision replacement only.
+- [x] Edit supports exactly one literal current-revision replacement only.
+- [x] Bash uses fixed shell policy and is documented as same-user execution.
+- [x] Every model-visible Result is bounded valid UTF-8 JSON.
+- [x] Natural failures, known not-applied outcomes, and ambiguity remain distinct.
+- [x] No mutating or unknown-footprint operation is automatically replayed.
+- [x] Deterministic tests require no live key or real host side effects.
+- [x] ExDoc explains schemas, registry, capabilities, validation, adapters, output,
   cancellation, failures, ambiguity, security, and deferred work.
-- [ ] The owner can maintain Tool System without the original AI conversation.
+- [x] The owner can maintain Tool System without the original AI conversation.
 
 ## Deferred Tool System Work
 

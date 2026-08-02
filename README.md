@@ -14,7 +14,13 @@ revisioned reads, atomic writes and exact edits, plus bounded project commands
 with isolated runtime directories, a minimal environment, streaming output,
 mutation permits, matching cancellation, independent inactivity and absolute
 deadlines, direct-child cleanup, and a deterministic scripted Fake backend for
-side-effect-free Tool tests. Model-facing tools remain planned in
+side-effect-free Tool tests. Tool System Phases 0-10 have fixed and live-verified
+the four MVP function schemas, added bounded contracts and a static registry,
+implemented one-call capability dispatch and deterministic presentation, and made
+bounded revisioned Read, revision-checked Write, exact-one literal Edit, and
+bounded unknown-footprint Bash executable. Deterministic Provider-to-Tool
+integration, continuation pairing, live four-schema acceptance, and the final
+reliability, security, and ExDoc review are complete in
 [`docs/plan/PLAN-TOOL-SYSTEM.md`](docs/plan/PLAN-TOOL-SYSTEM.md). This document
 describes both current behavior and intended constraints.
 
@@ -108,7 +114,7 @@ Manager           |
    |          RunCoordinator
    |              |
 SQLite       Provider tasks
-Git          Tool tasks
+   Git          Tool calls
 worktrees    Verification tasks
 ```
 
@@ -160,7 +166,7 @@ The important process boundaries are:
 
 - A `DynamicSupervisor` starts active runs on demand.
 - Each active run has one coordinator process.
-- Model streams, tools, verification commands, and git operations execute in supervised temporary tasks or dedicated port-owner processes.
+- In the target Runtime, model streams and long-running host operations execute in supervised temporary tasks or dedicated port-owner processes. The current Tool Executor itself is synchronous and starts no Task.
 - A unique `Registry` locates runs by binary IDs.
 - A duplicate `Registry` provides local event subscriptions.
 - SQLite is the durable source of truth.
@@ -289,24 +295,29 @@ Provider failures become one structured terminal `Provider.Error`; progress even
 
 ## Tools
 
-A tool is data plus behavior. It provides:
+A current MVP tool is immutable data plus pure preparation/presentation behavior. It provides:
 
 - A stable string name.
 - A model-visible description.
 - A JSON Schema for its arguments.
 - Execution behavior.
-- Structured result metadata.
-- Concurrency and mutation policy.
-- Idempotency and retry policy.
-- Time and output limits.
+- A trusted capability and side-effect class.
+- Structured bounded results and fixed no-retry execution semantics.
+- Time and output limits selected by trusted policy or schema-exposed lowering.
 
 A minimal tool behavior may resemble:
 
 ```elixir
 @callback specification() :: Synapse.Tool.Spec.t()
 
-@callback execute(Synapse.Tool.Call.t(), Synapse.Tool.Context.t()) ::
-  Synapse.Tool.Result.t()
+@callback prepare(Synapse.Tool.Call.t(), Synapse.Tool.Limits.t()) ::
+  {:ok, workspace_request()} | {:error, :invalid_arguments}
+
+@callback present(
+  Synapse.Tool.Call.t(),
+  workspace_outcome(),
+  Synapse.Tool.Limits.t()
+) :: Synapse.Tool.Result.t()
 ```
 
 The paired Result carries `status: :ok | :error | :ambiguous`; expected failure
@@ -319,7 +330,7 @@ The initial toolset should contain:
 - `edit`
 - `bash`
 
-`grep` and `glob` should follow shortly afterward.
+Search, grep, and glob remain deferred until after the four-tool MVP.
 
 ### Execution semantics
 
@@ -330,14 +341,20 @@ architecture and remain deferred until the sequential boundary is complete.
 - Every valid tool call submitted to the Executor receives a corresponding paired
   result, including unknown, invalid-argument, rejected, cancelled, failed, and
   ambiguous calls.
+- Built-in adapters prepare typed requests and present retained outcomes without
+  receiving the authenticated Workspace Handle. Executor's static Dispatcher
+  alone selects the exact Workspace operation, so reduced capability is not merely
+  advisory callback data.
 - Tool calls from a provider response truncated by its output limit are never executed because their arguments may be incomplete.
 - Side-effecting tools are not automatically replayed after a process crash.
-- Parallel-safe tools may execute concurrently.
-- Exclusive tools wait for earlier work and block later work until complete.
 - Mutations to the same canonical file path are serialized and revision-checked.
 - Tools with an unknown mutation footprint, such as unrestricted shell execution, require an exclusive workspace mutation lease.
-- Tool output is bounded and may spill into an inspectable artifact.
+- Tool output is structurally clipped to bounded JSON; durable artifact spill is deferred.
 - Model-supplied tool names never become atoms.
+
+Parallel/dependency-aware scheduling, queued exclusive Tool policy, automatic retry,
+and durable artifact references belong to the target architecture and are not part
+of the current one-call Executor.
 
 ### Concurrent file mutation
 
@@ -661,7 +678,10 @@ Every interception point defines deterministic reduction semantics such as:
 
 Extensions do not receive arbitrary access to mutable run coordinator state. Extension handles include their generation and become invalid when their runtime is retired.
 
-Tool result presentation uses structured data. Tools should not contain terminal-specific rendering code.
+Tool result presentation uses deterministic bounded JSON. It structurally clips
+only evidence fields, repairs arbitrary process bytes to valid UTF-8, and preserves
+Workspace uncertainty mechanically. Tools should not contain terminal-specific
+rendering code.
 
 ## Web Search And MCP
 
@@ -766,6 +786,13 @@ Project trust decides whether project-local code may be loaded. It is not a gene
 
 ### Capability enforcement
 
+The target architecture uses parameterized unforgeable capability tokens. The
+current MVP deliberately uses a smaller trusted in-VM `Synapse.Tool.CapabilitySet`
+of three booleans. It is forgeable by arbitrary code already executing in the BEAM
+and is not itself a security token. Model text cannot populate it; Executor reduces
+it into Workspace Access, and the authenticated Workspace Handle enforces the host
+boundary again.
+
 Tool security must be enforced programmatically by the runtime, not by asking the model to obey a prompt. Every request enters Synapse with an authenticated source and a policy-defined capability set. Effective capabilities are the intersection of source, user, project, workflow, task, and approval policy.
 
 Example capabilities include:
@@ -782,9 +809,9 @@ project.dispatch
 
 Capabilities may be parameterized by canonical path roots, network origins, command templates, provider profiles, secret names, and budgets. `fs.read` for an external chat source should therefore mean access to approved project paths, not unrestricted host filesystem access.
 
-An external chat integration can therefore be assigned only `fs.read` and selected query tools. Write, shell, secret, and dispatch tools are omitted from its turn snapshot, but omission is only a usability measure. The `ToolExecutor`, mutation coordinator, credential broker, and subprocess launcher all enforce the same capability token again when an operation executes.
+In the target architecture, an external chat integration can therefore be assigned only `fs.read` and selected query tools. Write, shell, secret, and dispatch tools are omitted from its turn snapshot, but omission is only a usability measure. `Synapse.Tool.Executor`, Workspace, and future credential/runtime boundaries must enforce trusted authority again when an operation executes.
 
-Capabilities are unforgeable runtime data attached to a run. They are never created from model text, tool arguments, or extension output. A subagent receives an explicitly delegated subset and cannot grant itself or its descendants additional authority. Every denied and allowed sensitive operation is auditable.
+Future capability tokens will be unforgeable runtime data attached to a run. Current MVP capability booleans and future tokens are never created from model text, tool arguments, or extension output. Delegated subagent subsets and complete sensitive-operation audit are deferred Runtime work.
 
 ### Secret broker
 
@@ -890,7 +917,7 @@ Synapse should apply the following ACI constraints:
 - Edit tools return the changed region and a structured diff immediately.
 - Cheap syntax or formatting checks run as close to the edit as possible.
 - An invalid edit should be rejected or clearly isolated before it creates a cascade of unrelated failures.
-- Large tool output is replaced by a bounded summary and a reference to a durable artifact.
+- Current large Tool output is structurally clipped with explicit truncation evidence. A bounded summary plus durable artifact reference is deferred.
 
 These limits are not merely cost controls. They protect the model's working attention from its own tendency to search too broadly or retain stale output.
 
@@ -927,7 +954,7 @@ The repository should contain or generate structured artifacts such as:
 .synapse/features.json
 .synapse/progress.jsonl
 docs/architecture/
-docs/plans/
+docs/plan/
 ```
 
 Exact filenames remain an implementation decision, but the responsibilities are important:

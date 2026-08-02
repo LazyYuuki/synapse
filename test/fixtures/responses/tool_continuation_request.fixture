@@ -11,24 +11,24 @@
       "id" => "item-read",
       "call_id" => "call-read",
       "name" => "read",
-      "arguments" => "{\"path\":\"mix.exs\"}"
+      "arguments" => "{\"limit\":null,\"offset\":null,\"path\":\"mix.exs\"}"
     },
     %{
       "type" => "function_call_output",
       "call_id" => "call-read",
-      "output" => "1: defmodule Synapse.MixProject do"
+      "output" => "{\"status\":\"ok\",\"tool\":\"read\"}"
     },
     %{
       "type" => "function_call",
       "id" => "item-test",
       "call_id" => "call-test",
       "name" => "bash",
-      "arguments" => "{\"command\":\"mix test\"}"
+      "arguments" => "{\"command\":\"mix test\",\"timeout_ms\":null}"
     },
     %{
       "type" => "function_call_output",
       "call_id" => "call-test",
-      "output" => "26 passed"
+      "output" => "{\"status\":\"ok\",\"tool\":\"bash\"}"
     }
   ],
   "tools" => [],
