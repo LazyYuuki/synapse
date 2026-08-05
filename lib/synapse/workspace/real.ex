@@ -29,10 +29,16 @@ defmodule Synapse.Workspace.Real do
 
   @doc false
   @spec open(OpenRequest.t()) :: {:ok, Handle.t()} | {:error, Error.t()}
-  def open(%OpenRequest{} = request) do
+  def open(%OpenRequest{} = request), do: open(request, Synapse.Workspace.Supervisor)
+
+  @doc false
+  @spec open(OpenRequest.t(), GenServer.server()) ::
+          {:ok, Handle.t()} | {:error, Error.t()}
+  def open(%OpenRequest{} = request, supervisor) do
     with true <- Platform.supported?(),
          token <- make_ref(),
-         {:ok, owner} <- MutationServer.start(request, token) do
+         {:ok, owner} <-
+           Synapse.Workspace.Supervisor.start_mutation_server(request, token, supervisor) do
       {:ok,
        %Handle{
          backend: __MODULE__,
@@ -443,9 +449,6 @@ defmodule Synapse.Workspace.MutationServer do
 
   @spec start_link({OpenRequest.t(), reference()}) :: GenServer.on_start()
   def start_link({request, token}), do: GenServer.start_link(__MODULE__, {request, token})
-
-  @spec start(OpenRequest.t(), reference()) :: {:ok, pid()} | {:error, term()}
-  def start(request, token), do: GenServer.start(__MODULE__, {request, token})
 
   @spec acquire(
           pid() | reference(),

@@ -48,7 +48,9 @@ defmodule Synapse.Agent.Error do
       :invalid_agent_context,
       :event_sink_failed,
       :tool_executor_contract_failed,
-      :conversation_projection_failed
+      :conversation_projection_failed,
+      :run_worker_crashed,
+      :workspace_close_failed
     ],
     provider: [:provider_failed, :provider_interrupted_after_output, :provider_retry_exhausted],
     protocol: [:empty_provider_response, :invalid_function_call_batch, :tool_admission_failed],
@@ -82,6 +84,8 @@ defmodule Synapse.Agent.Error do
           | :event_sink_failed
           | :tool_executor_contract_failed
           | :conversation_projection_failed
+          | :run_worker_crashed
+          | :workspace_close_failed
           | :provider_failed
           | :provider_interrupted_after_output
           | :provider_retry_exhausted
@@ -179,7 +183,30 @@ defmodule Synapse.Agent.Error do
 end
 
 defimpl Inspect, for: Synapse.Agent.Error do
-  def inspect(error, _options),
-    do:
-      "#Synapse.Agent.Error<kind=#{inspect(error.kind)} reason=#{inspect(error.reason)} redacted>"
+  def inspect(%{kind: kind, reason: reason}, _options)
+      when kind in [:internal, :provider, :protocol, :tool, :budget, :cancelled] and
+             reason in [
+               :invalid_run_request,
+               :invalid_agent_context,
+               :event_sink_failed,
+               :tool_executor_contract_failed,
+               :conversation_projection_failed,
+               :run_worker_crashed,
+               :workspace_close_failed,
+               :provider_failed,
+               :provider_interrupted_after_output,
+               :provider_retry_exhausted,
+               :empty_provider_response,
+               :invalid_function_call_batch,
+               :tool_admission_failed,
+               :tool_ambiguous,
+               :turn_budget_exhausted,
+               :tool_call_budget_exhausted,
+               :wall_time_budget_exhausted,
+               :output_budget_exhausted,
+               :run_cancelled
+             ],
+      do: "#Synapse.Agent.Error<kind=#{inspect(kind)} reason=#{inspect(reason)} redacted>"
+
+  def inspect(_error, _options), do: "#Synapse.Agent.Error<invalid redacted>"
 end

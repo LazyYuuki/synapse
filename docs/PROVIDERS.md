@@ -688,8 +688,8 @@ The MVP Tokamak Provider has one terminal return value: `{:ok, Response.t()}` or
 `{:error, Error.t()}`. Error kind, retryability, and `output_started` are
 independent axes: interruption or cancellation can occur before output, while
 any class after observable output must prevent transparent replay. Cancellation
-is initiated by the operation coordinator. A future Runtime will own those
-coordinators without changing the Provider contract.
+is initiated by the operation coordinator. Runtime owns the outer Agent coordinator
+without changing the Provider's private worker contract.
 
 ### Error taxonomy
 
@@ -729,8 +729,8 @@ messages, decoded payload maps, and credentials do not enter `Error`.
 | Error diagnostic object | 4 KiB, 32 entries, depth 4 | Not configurable | Cross-component error data |
 | Inactivity timeout | 120 seconds | 900 seconds | Hung or comment-only streams |
 
-An absolute deadline is supplied by the operation caller as a monotonic
-timestamp; future Runtime operations will normally own it. Req retries and
+An absolute deadline is supplied by the operation caller as a monotonic timestamp;
+public Runtime propagates the effective Agent deadline. Req retries and
 redirects remain disabled, so the Provider performs one bounded attempt.
 Configured parser and reducer limits reject non-positive values and values above
 their hard ceilings rather than accepting huge BEAM integers as configuration.

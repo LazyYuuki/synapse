@@ -6,14 +6,14 @@ Runtime, CLI, persistence, or workflow features.
 
 ## Scope And Ownership
 
-`Synapse.Agent.Runner.run/2` is one synchronous bounded function intended to run
-inside a future temporary supervised Task. It is not a GenServer because the MVP
+`Synapse.Agent.Runner.run/2` is one synchronous bounded function run inside a
+temporary Runtime-supervised Task. It is not a GenServer because the MVP
 has one caller, one immutable State lineage, one terminal return, and no justified
 long-lived mailbox, registry, subscription, or query API.
 
 ```text
-future CLI
-  -> future Runtime Task supervision and operation routing
+trusted caller or future CLI
+  -> Runtime Task supervision and operation routing
     -> Agent Runner: turns, projection, retry, cancellation policy, budgets
       -> Provider: HTTP/SSE normalization
       -> Tool Executor: one validated call and paired Result
@@ -25,7 +25,7 @@ Provider implementation may invoke its event callback from another process, so
 the callback captures immutable run, turn, operation, and Context values rather
 than relying on callback `self/0` or process-local State.
 
-Runtime, not Runner, will convert unexpected Runner Task exits, route cancellation
+Runtime, not Runner, converts unexpected Runner Task exits, routes cancellation
 to the active operation, and close the Workspace Handle. Provider exceptions,
 throws, and exits intentionally remain process failures rather than being confused
 with typed Provider terminals.

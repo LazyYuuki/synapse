@@ -1132,7 +1132,7 @@ This reduces accidental inheritance; it is not host isolation. A child running a
 - [x] Add a cancellation and terminal sequence diagram.
 - [x] Explain operation coordinator, worker, Port, and OS process ownership.
 - [x] Add failure, cancellation, timeout, and ambiguity examples.
-- [x] Document what Runtime will later own without implying it exists now.
+- [x] Document what Runtime owns without moving Workspace operation policy into it.
 
 ### Learning Gate
 

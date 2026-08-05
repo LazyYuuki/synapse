@@ -342,6 +342,7 @@ defmodule Synapse.Agent.ContractsTest do
     ]
 
     Enum.each(forbidden, &refute(source =~ &1))
+    refute source =~ "trap_exit"
   end
 
   defp run_request do

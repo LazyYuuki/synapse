@@ -44,7 +44,7 @@ defmodule Synapse.Agent.Runner do
   before every operation and continuation. Retry accounting remains a separate
   State transition because retries do not create logical turns.
 
-  Semantic Provider retry is separate from future Runtime process supervision.
+  Semantic Provider retry is separate from Runtime process supervision.
   Runner retries only allowlisted retryable failures before any output became
   visible, reusing the exact immutable Request with a fresh attempt operation ID.
   Text or Tool-call progress blocks transparent replay because a second attempt
@@ -124,7 +124,7 @@ defmodule Synapse.Agent.Runner do
   Event callbacks are synchronous and apply Provider backpressure. A rejected event
   terminates the run. Expected Provider, Tool, budget, cancellation, and protocol
   outcomes return a typed tuple; unexpected lower-layer exceptions and exits remain
-  process failures for Runtime supervision to convert in a future phase.
+  process failures for Runtime supervision to convert conservatively.
   """
   @spec run(Request.t(), Context.t()) :: Synapse.Agent.result()
   def run(request, context) do

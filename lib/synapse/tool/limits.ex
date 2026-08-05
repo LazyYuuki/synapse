@@ -27,6 +27,7 @@ defmodule Synapse.Tool.Limits do
   """
 
   alias Synapse.Tool.Validation
+  alias Synapse.Workspace.Limits, as: WorkspaceLimits
 
   @defaults %{
     max_call_id_bytes: 512,
@@ -116,6 +117,34 @@ defmodule Synapse.Tool.Limits do
     do: match?({:ok, %__MODULE__{}}, new(Map.from_struct(limits)))
 
   def valid?(_limits), do: false
+
+  @doc """
+  Returns whether Tool limits fit one validated Workspace ceiling.
+
+  Runtime uses this before opening a Workspace, and Tool Context repeats the
+  check against the authenticated Handle. The comparison covers every built-in
+  path, read, Bash output, timeout, inactivity, and operation-ID value delegated
+  into Workspace. Neither argument is trusted merely because it has the expected
+  struct tag.
+  """
+  @spec fits_workspace?(t(), WorkspaceLimits.t()) :: boolean()
+  def fits_workspace?(%__MODULE__{} = tool, %WorkspaceLimits{} = workspace) do
+    valid?(tool) and WorkspaceLimits.valid?(workspace) and
+      tool.max_operation_id_bytes <= workspace.max_operation_id_bytes and
+      tool.max_path_bytes <= workspace.max_path_bytes and
+      tool.default_read_lines <= workspace.default_read_lines and
+      tool.max_read_lines <= workspace.max_read_lines and
+      tool.default_read_source_bytes <= workspace.default_read_bytes and
+      tool.max_read_source_bytes <= workspace.max_read_bytes and
+      tool.default_bash_output_bytes <= workspace.default_process_output_bytes and
+      tool.max_bash_output_bytes <= workspace.max_process_output_bytes and
+      tool.default_bash_timeout_ms <= workspace.default_process_timeout_ms and
+      tool.max_bash_timeout_ms <= workspace.max_process_timeout_ms and
+      tool.default_bash_inactivity_ms <= workspace.default_process_inactivity_ms and
+      tool.max_bash_inactivity_ms <= workspace.max_process_inactivity_ms
+  end
+
+  def fits_workspace?(_tool, _workspace), do: false
 
   defp validate_positive_maximums(values) do
     case Enum.find(@fields, fn field ->

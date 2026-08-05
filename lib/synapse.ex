@@ -14,7 +14,15 @@ defmodule Synapse do
   enforcement, safe Provider retry, interruption, and persistent cancellation
   policy, deterministic full-loop integration, temporary Real Workspace evidence,
   opt-in live Tokamak acceptance, and the final reliability, security, and ExDoc
-  review. Runtime operations and CLI remain absent.
+  review. Runtime Phases 0-4 now provide the confirmed ownership model, public
+  result types, validated options, opaque Run handle, sanitized Runtime Error,
+  bounded RunServer state/messages, control-cell contracts, the permanent
+  Workspace/Task/Runtime infrastructure tree, temporary linked and monitored Agent
+  tasks, singleton Runtime admission, and supervised temporary real Workspace
+  owners. Public startup now returns an opaque Run after synchronous Workspace
+  readiness and invokes Agent Runner exactly once; owner-only await now publishes
+  one Workspace-gated terminal with timeout restoration and Runtime-loss handling.
+  Public cancellation and CLI remain absent.
 
   Start with the project architecture in `README.md` and the implementation
   sequence in `docs/plan/PLAN.md` when learning or contributing to the system. The

@@ -7,7 +7,7 @@ defmodule Synapse.Agent do
   Provider/Tool turns through full conversation history and
   continues until final text or a structured terminal. Provider owns transport,
   Tool Executor owns one validated operation, Workspace owns host effects, and
-  Runtime will own supervised process lifetime. Safe pre-output Provider retries
+  Runtime owns supervised process lifetime. Safe pre-output Provider retries
   and persistent cancellation observation remain Agent semantic policy.
 
   See `docs/learning/AGENT-LOOP.md` for ownership, projection, security, testing,

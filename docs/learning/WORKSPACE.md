@@ -599,8 +599,8 @@ holder death releases a lease immediately, while an already accepted bounded fil
 mutation retains ownership until its worker reaches a terminal result. A normal
 close similarly waits for accepted file work before its acknowledgment barrier.
 An accepted process holder death requests process stop and retains the permit until
-the direct child is confirmed down. Runtime will later own the caller process and
-send cancellation; Workspace does not implement Runtime supervision policy.
+the direct child is confirmed down. Runtime owns the Agent caller process and sends
+cancellation; Workspace does not implement Runtime supervision policy.
 MutationServer's child specification is `restart: :temporary`: a crash is terminal
 for that handle and never replays an accepted side effect. External editors and
 commands that bypass Workspace do not participate in this GenServer protocol and

@@ -2,6 +2,7 @@ defmodule Synapse.Tool.LimitsTest do
   use ExUnit.Case, async: true
 
   alias Synapse.Tool.Limits
+  alias Synapse.Workspace.Limits, as: WorkspaceLimits
 
   test "defaults match the Phase 0 decision record" do
     limits = Limits.default()
@@ -98,5 +99,21 @@ defmodule Synapse.Tool.LimitsTest do
 
     refute Limits.valid?(%Limits{defaults | max_argument_entries: 0})
     refute Limits.valid?(%{})
+  end
+
+  test "compares every delegated Tool ceiling with validated Workspace limits" do
+    tool = Limits.default()
+    workspace = WorkspaceLimits.default()
+
+    assert Limits.fits_workspace?(tool, workspace)
+
+    {:ok, narrow_reads} =
+      WorkspaceLimits.new(default_read_lines: tool.default_read_lines - 1)
+
+    refute Limits.fits_workspace?(tool, narrow_reads)
+    refute Limits.fits_workspace?(%{tool | max_path_bytes: 0}, workspace)
+    refute Limits.fits_workspace?(tool, %{workspace | max_path_bytes: 0})
+    refute Limits.fits_workspace?(%{}, workspace)
+    refute Limits.fits_workspace?(tool, %{})
   end
 end

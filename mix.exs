@@ -51,6 +51,7 @@ defmodule Synapse.MixProject do
         "docs/learning/WORKSPACE.md",
         "docs/learning/TOOL-SYSTEM.md",
         "docs/learning/AGENT-LOOP.md",
+        "docs/learning/RUNTIME.md",
         "docs/CLAUDE-HARNESS.md"
       ],
       groups_for_extras: [
@@ -68,11 +69,26 @@ defmodule Synapse.MixProject do
           "docs/learning/PROVIDER.md",
           "docs/learning/WORKSPACE.md",
           "docs/learning/TOOL-SYSTEM.md",
-          "docs/learning/AGENT-LOOP.md"
+          "docs/learning/AGENT-LOOP.md",
+          "docs/learning/RUNTIME.md"
         ],
         Research: ["docs/CLAUDE-HARNESS.md"]
       ],
       groups_for_modules: [
+        "Runtime Contracts And Supervision": [
+          Synapse.Application,
+          Synapse.Supervisor,
+          Synapse.Runtime,
+          Synapse.Runtime.Options,
+          Synapse.Runtime.Run,
+          Synapse.Runtime.Error,
+          Synapse.Runtime.AgentTask,
+          Synapse.Runtime.Supervisor,
+          Synapse.Runtime.RunServer,
+          Synapse.Runtime.RunServer.State,
+          Synapse.Runtime.RunServer.Message,
+          Synapse.Workspace.Supervisor
+        ],
         "Run And Agent Contracts": [
           Synapse.Budget,
           Synapse.Run.Request,

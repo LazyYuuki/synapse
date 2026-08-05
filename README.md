@@ -37,7 +37,35 @@ Provider retries, interruption safety, persistent cancellation policy, and
 deterministic, temporary Real Workspace, and opt-in live Tokamak acceptance. The
 implementation gates are recorded in
 [`docs/plan/PLAN-AGENT-LOOP.md`](docs/plan/PLAN-AGENT-LOOP.md); maintenance guidance
-is in [`docs/learning/AGENT-LOOP.md`](docs/learning/AGENT-LOOP.md).
+is in [`docs/learning/AGENT-LOOP.md`](docs/learning/AGENT-LOOP.md). Runtime Phases
+0-10 are complete and have fixed the one-active-run MVP topology, temporary RunServer and linked
+Agent Task ownership, synchronous Workspace readiness, start/cancel/await API,
+persistent cancellation, terminal cleanup gate, and conservative crash
+precedence; and implemented validated Runtime options, opaque Run authority,
+sanitized Runtime errors, bounded RunServer state/messages, atomics state
+contracts, Runtime-owned Agent failure reasons, the exact permanent infrastructure
+tree, one temporary linked and monitored Agent task, singleton Runtime admission,
+and supervised temporary real Workspace owners. Public accepted-run startup
+now validates trusted options, returns an opaque handle after `ready -> accept`,
+and runs Agent exactly once with task-owned Workspace authority. Owner-only await,
+Workspace-gated terminal publication, Runtime-loss reporting, timeout restoration,
+event/result agreement, at-most-once sink invocation, and idempotent persistent
+cancellation propagation through Provider and Tool operations are implemented.
+Caught and monitor-only Agent failures now become sanitized terminals using exact
+Workspace-close, buffered-terminal, cancellation, Tool-ambiguity, visible-output,
+and ordinary-crash precedence without replaying work. Aggregate monotonic deadlines,
+Provider and Tool inactivity ownership, and reverse-order application shutdown now
+propagate through existing Agent, Tokamak, and Workspace contracts without a competing
+Runtime operation timer. Public Runtime acceptance now completes an exact
+side-effect-free Fake `read -> write -> bash -> final text` loop and verifies and
+cancels bounded commands in synthetic temporary Real Workspaces with independent
+file, process, and owner-cleanup evidence. Repeated race, stale-authority,
+high-volume event, unavailable-supervisor, malformed-close, active-shutdown, and
+secret-retention audits now harden that lifecycle without adding replay or global
+run state. The implementation gates are recorded in
+[`docs/plan/PLAN-RUNTIME.md`](docs/plan/PLAN-RUNTIME.md); process ownership,
+maintenance, debugging, and deferred architecture are explained in
+[`docs/learning/RUNTIME.md`](docs/learning/RUNTIME.md).
 
 The step-by-step plan for the first functional model-tool-loop MVP is [`docs/plan/PLAN.md`](docs/plan/PLAN.md).
 
@@ -117,6 +145,9 @@ Each model turn uses an immutable snapshot of its model, tools, prompt, context,
 
 ## High-Level Architecture
 
+The diagram below is the target post-MVP daemon architecture, not the process tree
+implemented by the current single-run Runtime:
+
 ```text
 CLI / Bubble Tea / libvaxis client
                  |
@@ -160,9 +191,27 @@ The kernel does not understand:
 
 Those concerns are adapters, extensions, or workflow layers built on top of the kernel.
 
-## OTP Process Model
+## Current MVP Process Model
 
-The initial supervision tree should contain:
+The implemented Runtime uses this deliberately smaller tree:
+
+```text
+Synapse.Supervisor
+|-- Synapse.Workspace.Supervisor
+|   `-- temporary Real Workspace MutationServer
+|-- Synapse.TaskSupervisor
+|   `-- temporary Agent Task
+`-- Synapse.Runtime.Supervisor
+    `-- one temporary Runtime.RunServer
+```
+
+Run handles are returned directly to one owner. Run Events are synchronous and
+in-memory; there is no durable sequence, Registry lookup, subscription, replay,
+daemon protocol, or reconnectable client in the MVP.
+
+## Target Post-MVP OTP Process Model
+
+The later persistent daemon is expected to contain:
 
 ```text
 Synapse.Supervisor
@@ -306,7 +355,11 @@ MessageCompleted
 Diagnostic
 ```
 
-The current transport runs each HTTP request in a monitored temporary worker with a coordinator watchdog; future Runtime supervision will own operation processes above it. Server-sent event data is buffered across HTTP chunk boundaries before JSON decoding. Cancellation terminates the worker that owns the underlying request, not only display output.
+The current transport runs each HTTP request in a monitored temporary worker with a
+coordinator watchdog; Runtime owns the outer Agent operation process without
+re-supervising that private HTTP worker. Server-sent event data is buffered across
+HTTP chunk boundaries before JSON decoding. Cancellation terminates the worker that
+owns the underlying request, not only display output.
 
 Provider failures become one structured terminal `Provider.Error`; progress events are non-terminal.
 

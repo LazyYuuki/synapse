@@ -72,7 +72,9 @@ mix or release starts :synapse
   -> supervisor starts declared component children
 ```
 
-The Provider currently runs through focused tests and direct function calls. Its Tokamak transport owns a monitored temporary request worker; Runtime will later add supervised operation processes above that established ownership boundary.
+The Provider runs through focused tests, direct Agent calls, and public Runtime.
+Tokamak owns a monitored temporary request worker; Runtime supervises the outer
+Agent Task without replacing that established Provider ownership boundary.
 
 ## Dependencies
 

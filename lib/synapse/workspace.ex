@@ -63,6 +63,11 @@ defmodule Synapse.Workspace do
   def close(%Handle{} = handle), do: dispatch_close(handle)
   def close(_handle), do: invalid_handle(:close)
 
+  @doc false
+  @spec valid_handle?(term()) :: boolean()
+  def valid_handle?(%Handle{} = handle), do: validate_handle(handle) == :ok
+  def valid_handle?(_handle), do: false
+
   @doc "Validates authority and a bounded read request, then dispatches to the handle backend."
   @spec read(Handle.t(), ReadRequest.t(), OperationContext.t()) ::
           {:ok, ReadResult.t()} | {:error, Error.t()}

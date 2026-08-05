@@ -738,8 +738,10 @@ Synapse.Application
 `-- Synapse.Supervisor
     |-- Synapse.Workspace.Supervisor
     |   `-- Synapse.Workspace.MutationServer [temporary per opened handle]
-    `-- Synapse.TaskSupervisor
-        `-- Runtime run Task [temporary per accepted run]
+    |-- Synapse.TaskSupervisor
+    |   `-- Agent Runner Task [temporary per accepted run]
+    `-- Synapse.Runtime.Supervisor [one active run maximum]
+        `-- Synapse.Runtime.RunServer [temporary per accepted run]
 ```
 
 The tree should stay this small until a real ownership requirement appears.
@@ -747,10 +749,10 @@ The tree should stay this small until a real ownership requirement appears.
 ### Responsibilities
 
 - Start the application supervision tree.
-- Start one supervised run Task.
-- Open and close one Workspace owned by the run Task.
-- Monitor the owned run Task while Provider and Workspace retain their private
-  workers, ports, watchdogs, and cleanup.
+- Start one temporary RunServer and one linked supervised Agent Task.
+- Open and close one Workspace owned by the Agent Task.
+- Let RunServer monitor the Agent Task while Provider and Workspace retain their
+  private workers, ports, watchdogs, and cleanup.
 - Propagate persistent cancellation through existing Agent contexts.
 - Pass one effective absolute deadline and configured inactivity policy to the
   lower operation owners without creating competing timers.
@@ -770,23 +772,25 @@ The tree should stay this small until a real ownership requirement appears.
 
 ```text
 start_run
-  -> open Workspace under temporary run Task ownership
-  -> execute synchronous Agent Runner
-  -> close Workspace
+  -> start temporary RunServer
+  -> start linked temporary Agent Task
+  -> open Workspace under Agent Task ownership
+  -> execute synchronous Agent Runner once
+  -> observe Workspace settlement
   -> publish one terminal Run Event
   -> await returns Agent Result or Agent Error
 ```
 
 Provider inactivity starts near two minutes and Tool inactivity starts near three
 minutes. Provider and Workspace enforce those operation-specific timers from the
-contexts Agent constructs. Runtime owns the outer Task, cancellation state, and
-cleanup gate rather than duplicating lower watchdogs.
+contexts Agent constructs. RunServer owns cancellation, task monitoring, event
+tracking, and the cleanup gate rather than duplicating lower watchdogs.
 
 ### Retry Rules
 
 Agent applies semantic Provider retry policy from
-[`PLAN-AGENT-LOOP.md`](PLAN-AGENT-LOOP.md). Runtime owns the supervised outer run
-lifetime, cancellation source, and earlier deadline policy; it must preserve
+[`PLAN-AGENT-LOOP.md`](PLAN-AGENT-LOOP.md). RunServer owns the supervised outer
+run lifetime, cancellation source, and earlier deadline policy; it must preserve
 these replay constraints rather than independently retrying Runner or a request.
 
 - Connect, TLS, 429, and retryable 5xx failures may retry only before provider output.
@@ -1013,6 +1017,7 @@ lib/
   synapse/runtime/
     runtime.ex
     run.ex
+    run_server.ex
     error.ex
 
   synapse/cli/
@@ -1105,12 +1110,17 @@ Proof: Fake provider completes `read -> write -> bash -> final text` determinist
 
 Detailed phase gates: [`PLAN-RUNTIME.md`](PLAN-RUNTIME.md).
 
-- [ ] Run Agent Loop under TaskSupervisor.
-- [ ] Supervise temporary Workspace owners and run Tasks without restart.
-- [ ] Add start, await, terminal cleanup, and task monitoring.
-- [ ] Wire lower inactivity and absolute deadline policy.
-- [ ] Add cancellation propagation.
-- [ ] Convert worker exits to Run Events.
+- [x] Complete Runtime Phase 0 ownership, API, supervision, and terminal decisions.
+- [x] Implement Runtime options, Run/Error, lifecycle, control-cell, and failure contracts.
+- [x] Run Agent Loop under TaskSupervisor from one temporary RunServer.
+- [x] Supervise temporary RunServer, Agent, and Workspace owners without restart.
+- [x] Add start, await, terminal cleanup, and Agent-task monitoring.
+- [x] Wire lower inactivity and absolute deadline policy.
+- [x] Add cancellation propagation.
+- [x] Convert worker exits to Run Events.
+- [x] Prove deterministic Fake and temporary Real Runtime acceptance.
+- [x] Complete Runtime reliability and security hardening.
+- [x] Complete Runtime ExDoc and comprehension review.
 
 Proof: cancellation, timeout, and worker-crash tests leave no owned operation running.
 

@@ -122,8 +122,8 @@ Update this table only when a phase passes its completion gate.
                                      +---------------+
 ```
 
-Runtime will later start Runner in a supervised temporary Task, open and close the
-Workspace Handle, route cancellation, and convert worker exits. Runner itself is
+Runtime starts Runner in a supervised temporary Task, opens and closes the
+Workspace Handle, routes cancellation, and converts worker exits. Runner itself is
 a synchronous function for the MVP and does not require a GenServer.
 
 ## Dependency Direction
@@ -459,7 +459,7 @@ inspection redacts text and output items.
 }
 ```
 
-The Error normalizes enough data for Runtime and the future CLI to classify the
+The Error normalizes enough data for Runtime and a future CLI to classify the
 terminal without parsing prose or Tool Result content. Provider error kind,
 HTTP status, retryability, and output-started state may be copied into allowlisted
 details. Tool ambiguity records call ID, registered name, operation ID, and
@@ -503,7 +503,7 @@ tool_executor_contract_failed
 Runner returns exactly one terminal tuple. It emits Run Events synchronously
 before returning where the sink remains available. Expected failures are data;
 invalid direct calls do not raise. Programmer bugs may still crash the Runner
-Task and are converted by the future Runtime.
+Task and are converted by Runtime.
 
 ## Run Event Contract
 
@@ -1439,7 +1439,7 @@ Workspace, and Tool System Phases 0-10.
 - [x] Inject invalid Request, Context, Budget, Provider module, Handle, sink, and
   cancellation dependencies.
 - [x] Inject Provider exception/throw/exit through a dedicated test implementation
-  only where Runner is responsible rather than future Runtime.
+  only where Runner is responsible rather than Runtime.
 - [x] Inject malformed successful Response and unsupported output item.
 - [x] Inject every call-admission failure before side effects.
 - [x] Inject admission mismatch and malformed lower returns at the one-call Executor

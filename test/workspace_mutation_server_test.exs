@@ -22,6 +22,7 @@ defmodule Synapse.Workspace.MutationServerTest do
 
   test "starts one redacted temporary MutationServer per handle" do
     in_temporary_directory(fn root ->
+      baseline = DynamicSupervisor.count_children(Synapse.Workspace.Supervisor).active
       first = open_workspace(root)
       second = open_workspace(root)
 
@@ -29,12 +30,41 @@ defmodule Synapse.Workspace.MutationServerTest do
       assert Process.alive?(first.state)
       assert Process.alive?(second.state)
       assert MutationServer.child_spec(:ignored).restart == :temporary
+      assert DynamicSupervisor.count_children(Synapse.Workspace.Supervisor).active == baseline + 2
+
+      supervised =
+        Synapse.Workspace.Supervisor
+        |> DynamicSupervisor.which_children()
+        |> Enum.map(fn {_id, pid, _type, _modules} -> pid end)
+
+      assert first.state in supervised
+      assert second.state in supervised
 
       assert inspect(:sys.get_state(first.state)) ==
                "#Synapse.Workspace.MutationServer<redacted>"
 
       assert :ok = Workspace.close(first)
       assert :ok = Workspace.close(second)
+
+      assert eventually(fn ->
+               DynamicSupervisor.count_children(Synapse.Workspace.Supervisor).active == baseline
+             end)
+    end)
+  end
+
+  test "missing Workspace supervisor returns one structured unavailable open error" do
+    in_temporary_directory(fn root ->
+      dead_supervisor = spawn(fn -> :ok end)
+      monitor = Process.monitor(dead_supervisor)
+      assert_receive {:DOWN, ^monitor, :process, ^dead_supervisor, :normal}
+
+      assert {:error,
+              %Error{
+                kind: :unavailable,
+                reason: :backend_unavailable,
+                operation: :open,
+                outcome: :not_applicable
+              }} = Synapse.Workspace.Real.open(open_request(root), dead_supervisor)
     end)
   end
 
@@ -448,6 +478,7 @@ defmodule Synapse.Workspace.MutationServerTest do
 
   test "server crash and close release all ownership without restart or replay" do
     in_temporary_directory(fn root ->
+      baseline = DynamicSupervisor.count_children(Synapse.Workspace.Supervisor).active
       handle = open_workspace(root)
       server = handle.state
       monitor = Process.monitor(server)
@@ -473,6 +504,10 @@ defmodule Synapse.Workspace.MutationServerTest do
       assert_receive {:queued_result, {:error, :invalid_handle}}
       refute Process.alive?(server)
       refute Process.alive?(holder)
+
+      assert eventually(fn ->
+               DynamicSupervisor.count_children(Synapse.Workspace.Supervisor).active == baseline
+             end)
 
       assert {:error, %Error{reason: :invalid_handle}} =
                Workspace.read(handle, read_request("missing"), context("after-crash"))
@@ -689,6 +724,11 @@ defmodule Synapse.Workspace.MutationServerTest do
   end
 
   defp open_workspace(root, limits \\ Limits.default()) do
+    {:ok, handle} = Workspace.open(open_request(root, limits))
+    handle
+  end
+
+  defp open_request(root, limits \\ Limits.default()) do
     {:ok, access} = Access.new(read: true, write: true, exec: true)
 
     {:ok, request} =
@@ -699,8 +739,7 @@ defmodule Synapse.Workspace.MutationServerTest do
         access: access
       )
 
-    {:ok, handle} = Workspace.open(request)
-    handle
+    request
   end
 
   defp eventually(fun, attempts \\ 100)

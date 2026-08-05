@@ -75,7 +75,7 @@ defmodule Synapse.Tool.Context do
          {:ok, capabilities} <- normalize_capabilities(attrs[:capabilities]),
          {:ok, limits} <- normalize_limits(attrs[:limits]),
          true <-
-           limits_fit_workspace?(limits, workspace.limits) or
+           Limits.fits_workspace?(limits, workspace.limits) or
              {:error, {:limits, :must_fit_workspace_limits}},
          true <-
            Validation.identifier?(attrs[:operation_id], limits.max_operation_id_bytes) or
@@ -191,19 +191,4 @@ defmodule Synapse.Tool.Context do
 
   defp reduced_access(handle_access, :process_exec),
     do: Access.new(read: false, write: false, exec: handle_access.exec)
-
-  defp limits_fit_workspace?(tool, workspace) do
-    tool.max_operation_id_bytes <= workspace.max_operation_id_bytes and
-      tool.max_path_bytes <= workspace.max_path_bytes and
-      tool.default_read_lines <= workspace.default_read_lines and
-      tool.max_read_lines <= workspace.max_read_lines and
-      tool.default_read_source_bytes <= workspace.default_read_bytes and
-      tool.max_read_source_bytes <= workspace.max_read_bytes and
-      tool.default_bash_output_bytes <= workspace.default_process_output_bytes and
-      tool.max_bash_output_bytes <= workspace.max_process_output_bytes and
-      tool.default_bash_timeout_ms <= workspace.default_process_timeout_ms and
-      tool.max_bash_timeout_ms <= workspace.max_process_timeout_ms and
-      tool.default_bash_inactivity_ms <= workspace.default_process_inactivity_ms and
-      tool.max_bash_inactivity_ms <= workspace.max_process_inactivity_ms
-  end
 end

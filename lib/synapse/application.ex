@@ -2,10 +2,10 @@ defmodule Synapse.Application do
   @moduledoc """
   Starts and owns the root Synapse supervision tree.
 
-  The application supervisor is intentionally empty during project bootstrap.
-  Children will be added only when a component has a real process lifecycle or
-  mutable state to own. This keeps pure transformations out of GenServers and
-  makes every future supervised child an explicit architectural decision.
+  Runtime starts exactly three permanent infrastructure children under
+  `Synapse.Supervisor`: Workspace DynamicSupervisor, Task.Supervisor, and Runtime
+  DynamicSupervisor. Temporary RunServer, Agent, and real Workspace children are
+  started only on demand and never restarted after side effects.
 
   The OTP application controller calls `start/2`; application code should not
   call it directly.
@@ -16,18 +16,13 @@ defmodule Synapse.Application do
   @doc """
   Starts the named root supervisor for Synapse.
 
-  The supervisor uses `:one_for_one` so a future child can be restarted without
-  restarting unrelated components. Side-effecting one-shot operations will be
-  temporary supervised tasks rather than permanent children.
+  The root uses `:one_for_one`, starts infrastructure in dependency order, and
+  relies on reverse OTP shutdown order so Workspace cleanup remains available
+  while Runtime and Agent children terminate.
   """
   @impl true
   @spec start(Application.start_type(), term()) :: Supervisor.on_start()
   def start(_type, _args) do
-    children = []
-
-    Supervisor.start_link(children,
-      strategy: :one_for_one,
-      name: Synapse.Supervisor
-    )
+    Synapse.Supervisor.start_link()
   end
 end
