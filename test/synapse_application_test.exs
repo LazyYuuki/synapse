@@ -16,6 +16,10 @@ defmodule Synapse.ApplicationTest do
              Synapse.Runtime.Supervisor
            ]
 
+    refute Process.whereis(Synapse.API.Supervisor)
+    refute Process.whereis(Synapse.API.RunManager)
+    refute Process.whereis(Synapse.API.SessionSupervisor)
+
     children =
       Map.new(Supervisor.which_children(root), fn {id, pid, type, modules} ->
         {id, {pid, type, modules}}

@@ -6,7 +6,7 @@ This document is the implementation checklist for the Provider component defined
 
 It turns the provider research in [`../PROVIDERS.md`](../PROVIDERS.md) and the comprehension requirements in [`../../README.md`](../../README.md) into an ordered set of coding, testing, documentation, and learning tasks.
 
-The checklist is intentionally limited to the Provider component. It does not implement the Agent Loop, Workspace, built-in tools, Agent retry policy, Runtime operation supervision, or CLI rendering.
+The checklist is intentionally limited to the Provider component. It does not implement the Agent Loop, Workspace, built-in tools, Agent retry policy, Runtime operation supervision, API wire handling, or frontend rendering.
 
 ## Provider Outcome
 
@@ -114,7 +114,7 @@ Tokamak implementation
   -> Req
 ```
 
-No Provider module imports or calls Agent, Tool, Workspace, CLI, or Runtime.
+No Provider module imports or calls Agent, Tool, Workspace, API, frontend, or Runtime.
 
 Agent constructs one Provider StreamContext per attempt from Runtime-owned
 cancellation and deadline policy. Provider consumes that context but does not call
@@ -141,7 +141,7 @@ Runtime.
 - Tool execution.
 - Filesystem or subprocess access.
 - Run-level retry decisions.
-- User-facing rendering.
+- API wire mapping or frontend presentation.
 - Session persistence.
 - Worktrees.
 - Capability delegation.
@@ -224,7 +224,7 @@ The request does not contain:
 - Req options.
 - Tokamak endpoint paths.
 - Retry policy.
-- Terminal-rendering state.
+- API/frontend presentation state.
 - Workspace handles.
 
 ### Stream Context
@@ -358,7 +358,7 @@ The implementation does not call `tokamak launch`, does not call `launch-auth` f
 ### Architecture
 
 - [x] Confirm `PLAN.md` still defines Provider as a lower component called by Agent.
-- [x] Confirm Provider has no dependency on Agent, Tool, Workspace, CLI, or Runtime modules.
+- [x] Confirm Provider has no dependency on Agent, Tool, Workspace, API, frontend, or Runtime modules.
 - [x] Confirm the MVP endpoint is the Tokamak Codex pool proxy, not generic `/v1/responses`.
 - [x] Confirm the first model identifier available to the supplied Tokamak API key.
 - [x] Confirm the production Tokamak gateway base URL.

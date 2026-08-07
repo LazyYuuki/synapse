@@ -3,7 +3,7 @@ defmodule Synapse.Provider.Event do
   Ordered, normalized progress emitted while a provider request streams.
 
   The Provider creates events and synchronously sends them to the Agent Loop.
-  Events allow incremental rendering and tool-call accumulation, but they do not
+  Events allow incremental progress adaptation and tool-call accumulation, but they do not
   indicate terminal success by themselves. A completed `Synapse.Provider.Response`
   or terminal `Synapse.Provider.Error` remains authoritative.
 
@@ -153,9 +153,9 @@ defmodule Synapse.Provider.Event.MessageCompleted do
   Emits the completed normalized response at the end of successful streaming.
 
   The Provider's return value remains the authoritative terminal result; this
-  event lets synchronous observers finish incremental presentation first. The
-  Provider creates it and the Agent or renderer consumes it before `stream/3`
-  returns the same authoritative response.
+  event lets synchronous observers finish incremental progress handling first. The
+  Provider creates it and the Agent consumes it before `stream/3` returns the same
+  authoritative response.
   """
 
   alias Synapse.Provider.Response

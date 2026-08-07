@@ -1,0 +1,193 @@
+defmodule Synapse.API.ApplicationShutdownProvider do
+  @behaviour Synapse.Provider
+
+  alias Synapse.Provider.OutputItem.{FunctionCall, Message}
+  alias Synapse.Provider.Response
+
+  @impl true
+  def stream(request, _event_sink, _context) do
+    output_items =
+      if request.metadata["turn"] == 1 do
+        [
+          %FunctionCall{
+            id: "phase8-shutdown-item",
+            call_id: "phase8-shutdown-call",
+            name: "bash",
+            arguments: %{
+              "command" =>
+                "printf '%s' $$ > shutdown.pid; printf ready; " <>
+                  "trap '' TERM; while :; do :; done",
+              "timeout_ms" => 60_000
+            }
+          }
+        ]
+      else
+        [%Message{id: "phase8-unexpected-final", role: :assistant, content: "unexpected"}]
+      end
+
+    Response.new(id: "phase8-shutdown-response", model: request.model, output_items: output_items)
+  end
+end
+
+defmodule Synapse.API.ApplicationShutdownReal do
+  @behaviour Synapse.Workspace.Backend
+
+  alias Synapse.Workspace.{Handle, Real}
+
+  @impl true
+  def workspace_backend?, do: true
+
+  @impl true
+  def valid_handle?(%Handle{} = handle), do: Real.valid_handle?(real_handle(handle))
+
+  @impl true
+  def close(%Handle{} = handle), do: Real.close(real_handle(handle))
+
+  @impl true
+  def read(handle, request, context), do: Real.read(real_handle(handle), request, context)
+
+  @impl true
+  def write(handle, request, context), do: Real.write(real_handle(handle), request, context)
+
+  @impl true
+  def edit(handle, request, context), do: Real.edit(real_handle(handle), request, context)
+
+  @impl true
+  def run(handle, spec, event_sink, context) do
+    parent = Process.whereis(:phase8_application_shutdown_parent)
+
+    observed_sink = fn event ->
+      send(parent, {:phase8_process_event, handle.state, event})
+      event_sink.(event)
+    end
+
+    Real.run(real_handle(handle), spec, observed_sink, context)
+  end
+
+  defp real_handle(handle), do: %{handle | backend: Real}
+end
+
+defmodule Synapse.API.ApplicationShutdownFixture do
+  alias Synapse.API.{Command, Config, RunManager}
+  alias Synapse.Workspace
+  alias Synapse.Workspace.ProcessEvent
+
+  def run do
+    true = Process.register(self(), :phase8_application_shutdown_parent)
+    :ok = Application.stop(:synapse)
+    root = temporary_root()
+    File.mkdir!(root)
+
+    try do
+      {:ok, runtime_options} =
+        Synapse.Runtime.Options.new(
+          provider: Synapse.API.ApplicationShutdownProvider,
+          workspace_opener: &open_workspace/1
+        )
+
+      {:ok, config} =
+        Config.new(
+          enabled: true,
+          default_model: "model-a",
+          port: 0,
+          runtime_options: runtime_options
+        )
+
+      Application.put_env(:synapse, :api, config)
+      {:ok, _applications} = Application.ensure_all_started(:synapse)
+
+      {:ok, command} =
+        Command.Start.new(
+          %{
+            prompt: "Run the shutdown command",
+            cwd: root,
+            model: "model-a",
+            budget: config.budget
+          },
+          config
+        )
+
+      {:ok, run_id} = RunManager.start_run(Synapse.API.RunManager, command)
+      {backend, environment} = await_opened()
+      await_ready(backend, "")
+      state = :sys.get_state(Synapse.API.RunManager)
+      record = state.runs[run_id]
+      session = record.session_pid
+      runtime = record.runtime_run
+      shell_pid = root |> Path.join("shutdown.pid") |> File.read!() |> String.trim()
+
+      monitored = [session, runtime.server, runtime.task, backend, environment.guard]
+      monitors = Enum.map(monitored, &{&1, Process.monitor(&1)})
+      :ok = Application.stop(:synapse)
+
+      Enum.each(monitors, fn {pid, monitor} -> await_down(pid, monitor) end)
+
+      if os_process_alive?(shell_pid), do: raise("shutdown shell remained alive")
+      if File.exists?(environment.root), do: raise("shutdown process environment remained")
+      IO.puts("PHASE8_APPLICATION_SHUTDOWN_OK")
+    after
+      Application.delete_env(:synapse, :api)
+      File.rm_rf!(root)
+    end
+  end
+
+  def open_workspace(request) do
+    case Workspace.open(request) do
+      {:ok, handle} ->
+        environment = :sys.get_state(handle.state).process_environment
+
+        send(
+          Process.whereis(:phase8_application_shutdown_parent),
+          {:phase8_opened, handle.state, environment}
+        )
+
+        {:ok, %{handle | backend: Synapse.API.ApplicationShutdownReal}}
+
+      {:error, _error} = error ->
+        error
+    end
+  end
+
+  defp await_opened do
+    receive do
+      {:phase8_opened, backend, environment} -> {backend, environment}
+    after
+      10_000 -> raise "Workspace did not open"
+    end
+  end
+
+  defp await_ready(backend, output) do
+    receive do
+      {:phase8_process_event, ^backend, %ProcessEvent.Output{data: data}} ->
+        output = output <> data
+        if output =~ "ready", do: :ok, else: await_ready(backend, output)
+
+      {:phase8_process_event, ^backend, %ProcessEvent.Started{}} ->
+        await_ready(backend, output)
+    after
+      10_000 -> raise "direct process did not report ready"
+    end
+  end
+
+  defp await_down(pid, monitor) do
+    receive do
+      {:DOWN, ^monitor, :process, ^pid, _reason} -> :ok
+    after
+      10_000 -> raise "owned process remained alive"
+    end
+  end
+
+  defp os_process_alive?(pid) do
+    case System.cmd("/bin/kill", ["-0", pid], stderr_to_stdout: true) do
+      {_output, 0} -> true
+      {_output, _status} -> false
+    end
+  end
+
+  defp temporary_root do
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
+    Path.join(System.tmp_dir!(), "synapse-phase8-application-shutdown-#{suffix}")
+  end
+end
+
+Synapse.API.ApplicationShutdownFixture.run()

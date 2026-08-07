@@ -2,10 +2,11 @@ defmodule Synapse.Run.Request do
   @moduledoc """
   Trusted local intent and policy for one bounded Agent run.
 
-  A CLI or another trusted adapter creates Request. Runtime later validates and
-  opens `cwd`, then passes the resulting Workspace Handle separately through
-  `Synapse.Agent.Context`. Request deliberately contains no Provider module,
-  callback, credential, transport option, Workspace Handle, or terminal state.
+  API RunSession or another trusted adapter creates Request. Runtime later
+  validates and opens `cwd`, then passes the resulting Workspace Handle separately
+  through `Synapse.Agent.Context`. Request deliberately contains no Provider
+  module, callback, credential, transport option, Workspace Handle, or terminal
+  state.
 
   Fields:
 

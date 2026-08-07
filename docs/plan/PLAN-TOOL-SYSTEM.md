@@ -11,8 +11,9 @@ and [`../CLAUDE-HARNESS.md`](../CLAUDE-HARNESS.md) into an ordered set of coding
 testing, documentation, and learning tasks.
 
 The checklist is intentionally limited to Tool System. It does not implement the
-Agent Loop, Runtime supervision, Run Events, CLI rendering, persistence,
-worktrees, extensions, MCP, search tools, or a host security sandbox.
+Agent Loop, Runtime supervision, Run Events, API wire handling, frontend
+rendering, persistence, worktrees, extensions, MCP, search tools, or a host
+security sandbox.
 
 ## Tool System Outcome
 
@@ -130,7 +131,7 @@ Tool System
   -X-> Provider transport or SSE modules
   -X-> Agent conversation state
   -X-> Runtime supervision policy
-  -X-> CLI or terminal rendering
+  -X-> API wire handling or frontend rendering
   -X-> File, System, Port, Req, or MuonTrap
 ```
 
@@ -163,7 +164,7 @@ this dependency chain that may touch project files or local processes.
 - Conversation mutation or `function_call_output` insertion.
 - Run-level retry, budget, cancellation, or terminal-state policy.
 - Workspace root opening, path containment, revisions, atomicity, or processes.
-- Terminal rendering, persistence, telemetry, or artifact storage.
+- API/frontend presentation, persistence, telemetry, or artifact storage.
 - Dynamic tools, extensions, MCP, search, glob, grep, or tool search.
 - Host filesystem, process, network, or secret isolation.
 
@@ -1271,7 +1272,7 @@ module execution API is part of the MVP.
 ### Boundary Audits
 
 - [x] Static search confirms Tool modules call no File, System, Port, MuonTrap, Req,
-  Agent, Runtime, or CLI APIs.
+  Agent, Runtime, API-wire, or frontend-rendering APIs.
 - [x] Every deterministic adapter operation appears as one expected Fake Workspace
   entry.
 - [x] Real tests use only synthetic temporary roots and commands.
@@ -1487,7 +1488,7 @@ Do not add these before the MVP Tool System is complete:
   or external executable adapters.
 - Tool search, activation, ranking, or progressive schema disclosure.
 - Parallel, shared, exclusive, batched, or dependency-aware Tool execution.
-- Run Events, event persistence, terminal rendering, telemetry, or billing.
+- Run Events, event persistence, API/frontend presentation, telemetry, or billing.
 - Final source/user/project/workflow-scoped unforgeable capability tokens.
 - Approval prompts, interactive tools, delegated subagent capabilities, or policy
   escalation.

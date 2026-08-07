@@ -1,0 +1,93 @@
+defmodule Synapse.API.TestClient do
+  @moduledoc false
+
+  def open(port) do
+    with {:ok, connection} <-
+           :gun.open({127, 0, 0, 1}, port, %{protocols: [:http], retry: 0}),
+         {:ok, :http} <- await_up(connection),
+         stream <-
+           :gun.ws_upgrade(
+             connection,
+             "/v1/socket",
+             [{"host", "localhost:#{port}"}],
+             %{}
+           ),
+         {:ok, headers} <- await_upgrade(connection, stream),
+         {:ok, hello} <- receive_json(%{connection: connection, stream: stream}, 5_000) do
+      {:ok,
+       %{
+         connection: connection,
+         stream: stream,
+         port: port,
+         response_headers: headers,
+         hello: hello
+       }}
+    end
+  end
+
+  def send_command(client, type, request_id, payload) do
+    command = %{
+      "version" => 1,
+      "type" => type,
+      "request_id" => request_id,
+      "payload" => payload
+    }
+
+    encoded = JSON.encode!(command)
+
+    case :gun.ws_send(client.connection, client.stream, {:text, encoded}) do
+      :ok -> {:ok, command, encoded}
+      _failure -> {:error, :send_failed}
+    end
+  end
+
+  def receive_json(client, timeout) do
+    receive do
+      {:gun_ws, connection, stream, {:text, encoded}}
+      when connection == client.connection and stream == client.stream ->
+        case JSON.decode(encoded) do
+          {:ok, decoded} -> {:ok, decoded}
+          {:error, _reason} -> {:error, :invalid_server_json}
+        end
+
+      {:gun_ws, connection, stream, {:close, code, _reason}}
+      when connection == client.connection and stream == client.stream ->
+        {:error, {:closed, code}}
+
+      {:gun_down, connection, :ws, _reason, _streams} when connection == client.connection ->
+        {:error, :connection_down}
+    after
+      timeout -> {:error, :timeout}
+    end
+  end
+
+  def close(client) do
+    monitor = Process.monitor(client.connection)
+    :gun.close(client.connection)
+
+    receive do
+      {:DOWN, ^monitor, :process, connection, _reason} when connection == client.connection ->
+        :ok
+    after
+      5_000 -> {:error, :close_timeout}
+    end
+  end
+
+  defp await_up(connection) do
+    receive do
+      {:gun_up, ^connection, protocol} -> {:ok, protocol}
+      {:gun_down, ^connection, _protocol, _reason, _streams} -> {:error, :connection_down}
+    after
+      5_000 -> {:error, :connection_timeout}
+    end
+  end
+
+  defp await_upgrade(connection, stream) do
+    receive do
+      {:gun_upgrade, ^connection, ^stream, ["websocket"], headers} -> {:ok, headers}
+      {:gun_response, ^connection, ^stream, _fin, _status, _headers} -> {:error, :upgrade_failed}
+    after
+      5_000 -> {:error, :upgrade_timeout}
+    end
+  end
+end

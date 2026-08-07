@@ -6,7 +6,7 @@ This document is the implementation checklist for the Workspace component define
 
 It turns the filesystem, mutation, process, capability, and comprehension requirements in [`../../README.md`](../../README.md) into an ordered set of coding, testing, documentation, and learning tasks.
 
-The checklist is intentionally limited to Workspace. It does not implement model-facing Tool schemas, the Agent Loop, Provider behavior, Runtime supervision policy, worktree creation, Git integration, or CLI rendering.
+The checklist is intentionally limited to Workspace. It does not implement model-facing Tool schemas, the Agent Loop, Provider behavior, Runtime supervision policy, API wire handling, frontend rendering, worktree creation, or Git integration.
 
 ## Workspace Outcome
 
@@ -101,7 +101,7 @@ Workspace
   -X-> Agent
   -X-> Provider
   -X-> Runtime
-  -X-> CLI
+  -X-> API or frontend
 ```
 
 Tool Context currently derives each Workspace OperationContext from Agent-carried
@@ -666,7 +666,7 @@ This reduces accidental inheritance; it is not host isolation. A child running a
 
 ### Boundary
 
-- [x] Confirm Workspace remains lower than Tool and has no Tool, Agent, Provider, Runtime, or CLI dependency.
+- [x] Confirm Workspace remains lower than Tool and has no Tool, Agent, Provider, Runtime, API, or frontend dependency.
 - [x] Confirm all file and process operations receive a Workspace-specific operation context.
 - [x] Confirm the handle access ceiling and per-operation access reduction model.
 - [x] Confirm Workspace is an operational host boundary, not protection from malicious BEAM code.
@@ -1218,7 +1218,7 @@ This reduces accidental inheritance; it is not host isolation. A child running a
 - [x] Search all logging and inspection paths for file content, output, commands, and environment values.
 - [x] Test with recognizable synthetic provider and cloud secrets.
 - [x] Confirm errors and examples contain relative synthetic paths only.
-- [x] Confirm no Tool, Agent, Provider, Runtime, or CLI import exists.
+- [x] Confirm no Tool, Agent, Provider, Runtime, API, or frontend import exists.
 - [x] Confirm unsupported security behavior fails closed.
 - [x] State explicitly that subprocesses are not sandboxed.
 
@@ -1333,7 +1333,7 @@ Platform-specific process and filesystem tests must pass on the verified macOS t
 
 - [x] Phases 0 through 10 are complete.
 - [x] Workspace boundary matches `PLAN.md`.
-- [x] Workspace imports no Tool, Agent, Provider, Runtime, or CLI module.
+- [x] Workspace imports no Tool, Agent, Provider, Runtime, API, or frontend module.
 - [x] Every Workspace file-API target is a validated relative path under the opened root.
 - [x] Traversal, outside-root, symlink, and unsupported file-type cases follow the documented fail-closed policy.
 - [x] Reads are bounded, numbered, UTF-8 validated, and revisioned.

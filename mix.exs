@@ -28,6 +28,12 @@ defmodule Synapse.MixProject do
     [
       {:req, "~> 0.7.1"},
       {:muontrap, "== 1.8.0"},
+      {:bandit, "~> 1.12.4"},
+      {:plug, "~> 1.20.3"},
+      {:thousand_island, "~> 1.5.0"},
+      {:websock, "~> 0.5.3"},
+      {:websock_adapter, "~> 0.6.0"},
+      {:gun, "~> 2.5", only: :test},
       {:ex_doc, "~> 0.40.3", only: :dev, runtime: false}
     ]
   end
@@ -46,12 +52,14 @@ defmodule Synapse.MixProject do
         "docs/plan/PLAN-TOOL-SYSTEM.md",
         "docs/plan/PLAN-AGENT-LOOP.md",
         "docs/plan/PLAN-RUNTIME.md",
+        "docs/plan/PLAN-API.md",
         "docs/learning/MIX.md",
         "docs/learning/PROVIDER.md",
         "docs/learning/WORKSPACE.md",
         "docs/learning/TOOL-SYSTEM.md",
         "docs/learning/AGENT-LOOP.md",
         "docs/learning/RUNTIME.md",
+        "docs/learning/API.md",
         "docs/CLAUDE-HARNESS.md"
       ],
       groups_for_extras: [
@@ -62,7 +70,8 @@ defmodule Synapse.MixProject do
           "docs/plan/PLAN-WORKSPACE.md",
           "docs/plan/PLAN-TOOL-SYSTEM.md",
           "docs/plan/PLAN-AGENT-LOOP.md",
-          "docs/plan/PLAN-RUNTIME.md"
+          "docs/plan/PLAN-RUNTIME.md",
+          "docs/plan/PLAN-API.md"
         ],
         Learning: [
           "docs/learning/MIX.md",
@@ -70,11 +79,25 @@ defmodule Synapse.MixProject do
           "docs/learning/WORKSPACE.md",
           "docs/learning/TOOL-SYSTEM.md",
           "docs/learning/AGENT-LOOP.md",
-          "docs/learning/RUNTIME.md"
+          "docs/learning/RUNTIME.md",
+          "docs/learning/API.md"
         ],
         Research: ["docs/CLAUDE-HARNESS.md"]
       ],
       groups_for_modules: [
+        "Local WebSocket API": [
+          Mix.Tasks.Synapse.Server,
+          Synapse.API.Config,
+          Synapse.API.Protocol,
+          Synapse.API.ConfirmedTerminal,
+          Synapse.API.Wire,
+          Synapse.API.RunManager,
+          Synapse.API.RunSession,
+          Synapse.API.Socket,
+          Synapse.API.Router,
+          Synapse.API.SessionSupervisor,
+          Synapse.API.Supervisor
+        ],
         "Runtime Contracts And Supervision": [
           Synapse.Application,
           Synapse.Supervisor,

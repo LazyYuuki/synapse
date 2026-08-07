@@ -4,8 +4,13 @@ defmodule Synapse.Runtime.Run do
 
   Runtime creates this value only after the Agent task has opened Workspace,
   validated Agent Context, and completed the ready/accept handshake. Callers pass
-  it only to `Synapse.Runtime.cancel/1` and `Synapse.Runtime.await/2`; they must not
-  construct, persist, serialize, transfer, or inspect its internal authority.
+  it only to `Synapse.Runtime.cancel/1` and `Synapse.Runtime.await/2`. The starting
+  owner may deliberately share it with one trusted lifecycle adapter for
+  non-owner cancellation, but it must not be constructed, persisted, serialized,
+  exposed beyond that trusted boundary, or inspected for internal authority.
+
+  Await remains restricted to the process that called `start_run/3`; sharing the
+  handle does not transfer the await right.
 
   Opaqueness and redacted inspection reduce accidental misuse. They are not an
   unforgeable security boundary against arbitrary code already executing in the

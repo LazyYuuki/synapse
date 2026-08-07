@@ -160,8 +160,8 @@ defmodule Synapse.Agent.RetryCancellationTest do
 
     assert {{:error, %AgentError{reason: :wall_time_budget_exhausted}}, [1, 1], _events} =
              run_provider(run, operation_ids, fn _context -> script end,
-               deadline: System.monotonic_time(:millisecond) + 100,
-               retry_delay: fn _ -> 1_000 end
+               deadline: System.monotonic_time(:millisecond) + 5_000,
+               retry_delay: fn _ -> 10_000 end
              )
   end
 

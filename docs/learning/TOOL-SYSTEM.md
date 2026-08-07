@@ -807,7 +807,8 @@ flow is the first test in `test/tool_integration_test.exs`:
 The ambiguity stop is implemented Agent policy, not a hidden Executor queue.
 Runner owns in-memory conversation state, per-call trusted Context and operation
 IDs, turn sequencing, Run Events, retry, interruption, and later-call admission.
-Durable conversation and active-operation supervision remain deferred.
+Runtime now owns active-operation supervision; durable conversation state remains
+deferred.
 
 The opt-in `live_tool_schema_test.exs` sends all four exact Registry schemas to the
 Tokamak Codex pool and asks for one harmless Read call. It verifies successful
@@ -819,7 +820,7 @@ execution; deterministic Fake and supported-platform Real tests own those claims
 
 ## Deferred Capabilities
 
-The MVP intentionally has no dynamic registration, search/glob/grep, file delete
+Tool System intentionally has no dynamic registration, search/glob/grep, file delete
 or rename, patch/multi-file mutation, parallel/dependency scheduling, Run Events,
 approval prompts, delegated subagent authority, credential injection, command
 templates, PTY/stdin/background jobs, sandboxing, artifact spill, secret filtering,
@@ -1028,7 +1029,7 @@ mix docs
     supplies a bounded Workspace operation ID through Context.
 34. Agent owns in-memory conversation and attempt state, Context creation, event
     emission, turn lifecycle, interruption, retry, and terminal Tool policy.
-    Runtime and persistence still own durable state and process supervision.
+    Runtime owns process supervision. No implemented component owns durable run state.
 35. It proves remote wire compatibility and bounded call construction only. The
     call is not executed; Workspace authority, path, mutation, and process safety
     require deterministic Fake and supported-platform Real tests.
@@ -1049,6 +1050,6 @@ mix docs
 
 ## Completion
 
-Tool System Phases 0-10 and Agent Loop Phases 0-10 are complete. Runtime is the
-next MVP component and must supervise Runner without moving sequencing or semantic
-policy into Executor or adapters.
+Tool System, Agent Loop, and Runtime Phases 0-10 are complete, and the local API is
+implemented above Runtime. Neither higher adapter moves Agent sequencing or Tool
+semantic policy into Executor or adapters.

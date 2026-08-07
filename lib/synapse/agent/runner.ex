@@ -93,8 +93,8 @@ defmodule Synapse.Agent.Runner do
 
   Acceptance verifies file content and command exit evidence independently of the
   model's final claim. Agent completion still is not workflow acceptance: Runtime
-  supervision, CLI exit policy, evidence workflows, commits, and work-item state
-  remain outside this component.
+  supervision, API wire and frontend presentation, evidence workflows, commits,
+  and work-item state remain outside this component.
 
   ```text
   terminal Response -> whole-batch Admission

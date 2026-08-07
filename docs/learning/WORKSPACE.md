@@ -14,9 +14,9 @@ sink that retains no bytes.
 
 ## Trusted Configuration And Operation Input
 
-`Synapse.Workspace.OpenRequest` is trusted application configuration. Runtime or
-CLI supplies the root, owner PID, limits, and maximum access. Model output must
-never choose or expand those values.
+`Synapse.Workspace.OpenRequest` is trusted application configuration. Runtime or a
+trusted direct application/test caller supplies the root, owner PID, limits, and
+maximum access. Model output must never choose or expand those values.
 
 `ReadRequest`, `WriteRequest`, `EditRequest`, and `ProcessSpec` are operation
 inputs. Tool may derive them from validated model arguments, but it cannot raise
@@ -34,7 +34,7 @@ The initial supported environment is Darwin arm64 with Darwin 24.6 or later and
 an APFS root. Linux, Intel macOS, older Darwin, and non-APFS roots fail closed.
 The APFS probe is a fixed platform check, not a model-selected command.
 
-Runtime or CLI may provide a trusted root containing symlinks. Workspace follows
+Runtime or another trusted caller may provide a root containing symlinks. Workspace follows
 root symlinks in OS component order, including `.` and `..` after symlink
 expansion, for at most 40 links. It then requires an existing readable directory
 and stores its canonical pathname plus device, inode, and type identity in the
@@ -739,7 +739,7 @@ component-level use of the complete Workspace contract.
 
 | Contract | Producer | Consumer |
 | --- | --- | --- |
-| `OpenRequest` | Runtime or CLI | Workspace real backend |
+| `OpenRequest` | Runtime or trusted direct caller | Workspace real backend |
 | `Handle` | Workspace real or Fake backend | Workspace facade caller |
 | `OperationContext` | Runtime | Workspace backend and operation owner |
 | `ReadRequest` | Tool or trusted caller | Workspace reader |
@@ -749,7 +749,7 @@ component-level use of the complete Workspace contract.
 | `ProcessSpec` | Tool or trusted caller | ProcessRunner |
 | `ProcessEvent.Started`, `ProcessEvent.Output` | ProcessRunner | Synchronous event sink |
 | `ProcessResult` | ProcessRunner | Tool or trusted caller |
-| `Error` | Workspace facade or backend | Tool, Runtime, or CLI |
+| `Error` | Workspace facade or backend | Tool, Runtime, or trusted direct caller |
 
 ## Facade Examples
 

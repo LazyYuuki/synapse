@@ -5,7 +5,9 @@ defmodule Synapse.Run.Event do
   Agent creates events with `new/2` and sends them to the trusted synchronous
   `Synapse.Agent.Context.event_sink`. Events provide ordered UI-independent
   progress but are not durable records in the MVP: sequence numbers, timestamps,
-  persistence, and replay remain Runtime work.
+  persistence, and replay remain higher-layer adapter work. The local API may add
+  bounded process-lifetime sequence and replay projections without changing this
+  contract.
 
   Every event carries a run ID. Turn and operation events carry their explicit
   identities. Tool completion exposes typed status and allowlisted safe metadata,

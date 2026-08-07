@@ -37,7 +37,9 @@ test/
 
 ### `mix.exs`
 
-`Synapse.MixProject` describes the project to Mix. It declares the application name and version, supported Elixir version, OTP application callback module, dependencies, and ExDoc configuration.
+The project module in `mix.exs` describes the project to Mix. It declares the
+application name and version, supported Elixir version, OTP application callback
+module, dependencies, and ExDoc configuration.
 
 `mix.exs` is evaluated by the build tool. Application code under `lib/` must not use `Mix.env/0` because Mix is not expected to be present in a production release.
 
@@ -47,13 +49,18 @@ The formatter configuration tells `mix format` which Elixir source and script fi
 
 ### `lib/synapse.ex`
 
-`Synapse` is the public namespace and ExDoc entry point for application modules. It deliberately has no placeholder `hello/0` function because Synapse does not yet have a meaningful product API.
+`Synapse` is the public namespace and ExDoc entry point for application modules. It
+deliberately has no redundant convenience functions; public behavior lives in
+component modules such as `Synapse.Runtime` and the opt-in local API.
 
 ### `lib/synapse/application.ex`
 
 `Synapse.Application` implements the `Application` behaviour. The OTP application controller calls `start/2`, which starts the named `Synapse.Supervisor` root supervisor.
 
-The root supervisor currently has no children. An empty supervisor is intentional: a module should become a supervised process only when it owns lifecycle, mutable state, cancellation, or fault isolation. Provider request encoding and SSE parsing will be pure modules, not GenServers.
+The root supervisor always starts Workspace, Task, and Runtime infrastructure.
+Validated opt-in API configuration appends `Synapse.API.Supervisor` after Runtime.
+Pure Provider request encoding and SSE parsing remain ordinary modules rather than
+GenServers because they own no independent lifecycle or mutable state.
 
 ### `test/test_helper.exs`
 
@@ -124,7 +131,7 @@ Use `mix format` to apply formatting and `mix format --check-formatted` to verif
 
 `iex -S mix` starts an interactive Elixir shell with Synapse and its dependencies loaded. It is useful for learning module APIs, but repeatable behavior belongs in ExUnit tests.
 
-## Why The Supervisor Is Empty
+## Why The Bootstrap Supervisor Was Initially Empty
 
 Creating a GenServer or supervised child for every concept would hide ownership rather than clarify it. The initial Provider work contains several pure transformations:
 
@@ -133,7 +140,9 @@ Creating a GenServer or supervised child for every concept would hide ownership 
 - Incremental SSE framing.
 - Responses event reduction.
 
-Those transformations are ordinary modules with immutable input and output. The supervision tree will gain children when Runtime operation ownership, workspace mutation serialization, and run lifecycle require long-lived processes.
+Those transformations remain ordinary modules with immutable input and output. The
+supervision tree later gained children exactly where Workspace mutation, Runtime
+operation ownership, and the optional API listener required lifecycle boundaries.
 
 ## Implemented Provider Boundary
 
@@ -154,7 +163,9 @@ Synapse.Provider.Tokamak
 Synapse.Provider.Fake
 ```
 
-The normalized contracts were documented and tested before transport and parsing were added. Workspace is the next component in the overall build order.
+The normalized contracts were documented and tested before transport and parsing
+were added. Workspace, Tool, Agent, Runtime, and the local API now build on that
+boundary without moving Provider ownership into higher adapters.
 
 Continue with the phase-by-phase [Provider Component Learning Guide](PROVIDER.md)
 for the complete request, SSE, tool-call, credential, transport, Fake, hardening,

@@ -319,10 +319,13 @@ descendants.
 
 ## Deferred Architecture
 
-The MVP deliberately has no persistent daemon, RunCoordinator, run/event Registry,
-SQLite event store, durable sequence numbers, subscriptions, reconnect, replay,
-snapshots, steering queues, concurrent runs, worktree workflow, verification state,
-credential broker, extension manager, or distributed failover.
+Runtime deliberately owns no persistent daemon, RunCoordinator, run/event Registry,
+SQLite event store, sequence numbers, subscriptions, replay, or snapshots. The
+higher local API adds bounded process-lifetime lookup, subscriptions, snapshots,
+reconnect, and replay. Durable sequence identity, storage, recovery across
+Manager/application restart, steering queues, concurrent runs, worktree workflow,
+verification state, credential broker, extension manager, and distributed failover
+remain deferred.
 
 Those features must reuse the current opaque authority, temporary-child no-restart
 policy, persistent cancellation, terminal cleanup gate, and conservative ambiguity
@@ -340,7 +343,7 @@ classification rather than silently replacing them.
 8. Why does await timeout preserve the right to await again?
 9. Which timeout policy owns Provider silence and process silence?
 10. Why can no temporary side-effecting child use automatic restart?
-11. Which daemon, persistence, and reconnect capabilities remain deferred?
+11. Which daemon, persistence, and durable reconnect capabilities remain deferred?
 
 Answers:
 
@@ -354,4 +357,6 @@ Answers:
 8. Await timeout is caller receive policy, not run cancellation or terminal evidence.
 9. Provider owns Provider inactivity; Workspace owns process inactivity and timeout.
 10. Restart could replay visible output or an uncertain side effect.
-11. The persistent daemon, registries, durable events, reconnect/replay, and multi-run recovery tree.
+11. Durable run/event storage, stable sequence identity, restart recovery, and the
+    multi-run persistent daemon tree; the higher API already supplies bounded
+    process-lifetime reconnect/replay.

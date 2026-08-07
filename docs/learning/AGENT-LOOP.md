@@ -2,7 +2,7 @@
 
 This guide explains the implemented synchronous Agent Loop. It is the maintenance
 companion to [`PLAN-AGENT-LOOP.md`](../plan/PLAN-AGENT-LOOP.md), not a proposal for
-Runtime, CLI, persistence, or workflow features.
+Runtime, API transport, persistence, or workflow features.
 
 ## Scope And Ownership
 
@@ -12,7 +12,7 @@ has one caller, one immutable State lineage, one terminal return, and no justifi
 long-lived mailbox, registry, subscription, or query API.
 
 ```text
-trusted caller or future CLI
+API RunSession or another trusted adapter
   -> Runtime Task supervision and operation routing
     -> Agent Runner: turns, projection, retry, cancellation policy, budgets
       -> Provider: HTTP/SSE normalization
@@ -287,12 +287,14 @@ is stronger than a model's textual claim that work succeeded.
 
 ## Deferred Work
 
-Runtime still owns Task supervision, worker-exit conversion, active-operation
-routing, Workspace lifetime, durable event sequencing, timestamps, subscriptions,
-and cancellation delivery.
+Runtime owns Task supervision, worker-exit conversion, active-operation routing,
+Workspace lifetime, and cancellation delivery. The higher local API owns ephemeral
+sequence numbers, subscriptions, snapshots, and replay. Durable sequencing,
+timestamps, persistence, and recovery across Manager/application restart remain
+deferred.
 
 Persistence and long-running harness work remains deferred: sessions, append-only
-history, reconnectable clients, context compaction, summaries, artifacts, follow-up
+history, durable reconnect across restart, context compaction, summaries, artifacts, follow-up
 queues, steering, approvals, verification workflows, acceptance, commits, work-item
 state, worktrees, rollback, and merge integration.
 

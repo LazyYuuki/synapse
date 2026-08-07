@@ -13,8 +13,8 @@ testing, documentation, and learning tasks.
 
 The checklist is intentionally limited to the Agent Loop and the shared Run
 contracts it needs. It does not implement Runtime supervision, Workspace opening,
-CLI parsing or rendering, persistence, verification workflows, context
-compaction, worktrees, subagents, extensions, or a persistent daemon.
+API wire handling or frontend rendering, persistence, verification workflows,
+context compaction, worktrees, subagents, extensions, or a persistent daemon.
 
 ## Agent Loop Outcome
 
@@ -142,7 +142,7 @@ Agent Loop
   -X-> Req, Finch, SSE, Tokamak JSON, or credentials
   -X-> File, System, Port, MuonTrap, or direct Workspace operations
   -X-> Runtime modules or supervision APIs
-  -X-> CLI or terminal rendering
+  -X-> API wire handling or frontend rendering
   -X-> persistence, Git, worktrees, verification, or extensions
 ```
 
@@ -179,7 +179,7 @@ import or call Agent.
 - Workspace Handle creation or closure.
 - Task supervision, worker restart policy, or crash conversion.
 - Durable event sequence numbers, timestamps, storage, or replay.
-- Terminal rendering or CLI exit codes.
+- API wire mapping, frontend presentation, or workflow result policy.
 - Task verification, evidence collection, acceptance, or commits.
 - Context compaction, summaries, persistence, or cross-session memory.
 - Worktrees, fresh-attempt retry, follow-up queues, or steering messages.
@@ -250,7 +250,7 @@ target architecture in `README.md`.
 | Multiple calls | Sequential Provider source order | Matches the one-call Executor boundary |
 | Ordinary Tool error | Pair, append, execute later admitted calls, then continue | The model can repair invalid or stale operations |
 | Ambiguous Tool result | Pair locally, stop later calls, terminate without continuation | Missing outputs and uncertain side effects make replay unsafe |
-| Tool exposure | Advertise all four static MVP schemas every turn | CLI MVP grants the fixed local capability set; filtering is deferred |
+| Tool exposure | Advertise all four static MVP schemas every turn | API server policy supplies the fixed-shape local capability set; filtering is deferred |
 | Capability enforcement | Executor remains authoritative | Schema visibility is usability, not authorization |
 | Provider retry owner | Agent owns semantic retry policy; Runtime later owns process lifetime | Agent knows response visibility, conversation, and retry budget |
 | Safe retry limit | At most two retries across one run, before output only | Bounded recovery without hidden replay |
@@ -335,9 +335,9 @@ Initial hard Budget ceilings:
 }
 ```
 
-The CLI or another trusted adapter creates the Request. Runtime validates and
-opens `cwd` before Agent starts. Agent uses `id`, `prompt`, `model`, capabilities,
-and Budget; it does not call filesystem APIs for `cwd`.
+API RunSession or another trusted adapter creates the Request. Runtime validates
+and opens `cwd` before Agent starts. Agent uses `id`, `prompt`, `model`,
+capabilities, and Budget; it does not call filesystem APIs for `cwd`.
 
 Initial hard contract ceilings:
 
@@ -459,8 +459,8 @@ inspection redacts text and output items.
 }
 ```
 
-The Error normalizes enough data for Runtime and a future CLI to classify the
-terminal without parsing prose or Tool Result content. Provider error kind,
+The Error normalizes enough data for Runtime and higher API adapters to classify
+the terminal without parsing prose or Tool Result content. Provider error kind,
 HTTP status, retryability, and output-started state may be copied into allowlisted
 details. Tool ambiguity records call ID, registered name, operation ID, and
 status, but not Tool content, arguments, command, path, or process output.
@@ -1410,7 +1410,7 @@ Workspace, and Tool System Phases 0-10.
 ### Boundary Audits
 
 - [x] Static search confirms Agent modules call no Req, Finch, File, System, Port,
-  MuonTrap, Runtime, CLI, or terminal APIs.
+  MuonTrap, Runtime, API-wire, or frontend-rendering APIs.
 - [x] Agent calls Workspace only indirectly through Tool Executor.
 - [x] Every deterministic external operation appears in a Fake script.
 - [x] No deterministic test depends on wall-clock sleep or concurrent sender order.

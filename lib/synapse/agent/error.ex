@@ -2,9 +2,9 @@ defmodule Synapse.Agent.Error do
   @moduledoc """
   Sanitized structured failure, interruption, ambiguity, or Budget terminal.
 
-  Error carries stable typed policy data so Runtime and the future CLI never need
-  to parse prose or Tool Result JSON. Details are bounded string-keyed JSON with a
-  small Agent-owned key allowlist. They may retain Provider classification,
+  Error carries stable typed policy data so Runtime and higher API adapters never
+  need to parse prose or Tool Result JSON. Details are bounded string-keyed JSON
+  with a small Agent-owned key allowlist. They may retain Provider classification,
   operation correlation, Tool ambiguity identity, or Budget counts, but never
   prompt, file content, command, process output, absolute path, Handle, callback,
   exception, credential, or arbitrary Tool metadata.

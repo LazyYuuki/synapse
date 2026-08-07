@@ -13,9 +13,10 @@ Use this guide together with:
 - The generated ExDoc API pages for exact function and type documentation.
 - The focused tests under `test/` for executable examples.
 
-The Provider component is complete through Phases 0 to 10. The next component is
-Workspace, but understanding Provider first is important because Agent, Runtime,
-and the CLI will depend on its contracts.
+The Provider component is complete through Phases 0 to 10. Workspace, Tool, Agent,
+Runtime, and the local API are now implemented above it. Agent depends directly on
+Provider contracts; Runtime and API preserve that boundary and do not call Provider
+directly.
 
 ## The Core Idea
 
@@ -986,9 +987,9 @@ Try answering these before reading the answer guide:
 10. Workspace performs bounded filesystem and subprocess operations after the
     Tool System requests them.
 
-## What Comes Next
+## Guide Pattern Used By Later Components
 
-Workspace is the next component. Its learning guide should use the same pattern:
+The later Workspace, Tool, Agent, Runtime, and API guides use the same pattern:
 
 1. Explain the component boundary before implementation.
 2. Add a chapter for each completed phase.
@@ -996,7 +997,7 @@ Workspace is the next component. Its learning guide should use the same pattern:
 4. Point to focused tests and runnable commands.
 5. End with comprehension questions and an answer guide.
 
-Workspace will own project paths, bounded reads, revisions, serialized and
+Workspace owns project paths, bounded reads, revisions, serialized and
 atomic mutations, subprocess execution, cancellation, output limits, and secret
 removal from child environments. Provider will remain unchanged and will never
 access project files directly.

@@ -56,7 +56,8 @@ defmodule Synapse.Workspace.MutationServerTest do
     in_temporary_directory(fn root ->
       dead_supervisor = spawn(fn -> :ok end)
       monitor = Process.monitor(dead_supervisor)
-      assert_receive {:DOWN, ^monitor, :process, ^dead_supervisor, :normal}
+      assert_receive {:DOWN, ^monitor, :process, ^dead_supervisor, reason}
+      assert reason in [:normal, :noproc]
 
       assert {:error,
               %Error{

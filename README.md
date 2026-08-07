@@ -67,6 +67,15 @@ run state. The implementation gates are recorded in
 maintenance, debugging, and deferred architecture are explained in
 [`docs/learning/RUNTIME.md`](docs/learning/RUNTIME.md).
 
+Local WebSocket API Phases 0-10 are complete. `mix synapse.server` adds a
+loopback-only protocol-v1 endpoint with one active run, disconnect-safe execution,
+bounded process-lifetime snapshots/replay, explicit stale-cursor reset, and strict
+same-user local trust. It serves no frontend and accepts no credentials, capability
+grants, Provider selection, callbacks, handles, or Runtime options. The detailed
+contract is in [`docs/plan/PLAN-API.md`](docs/plan/PLAN-API.md); the protocol,
+ownership, failure, security, and maintenance guide is
+[`docs/learning/API.md`](docs/learning/API.md).
+
 The step-by-step plan for the first functional model-tool-loop MVP is [`docs/plan/PLAN.md`](docs/plan/PLAN.md).
 
 ## Design Decisions
@@ -193,7 +202,8 @@ Those concerns are adapters, extensions, or workflow layers built on top of the 
 
 ## Current MVP Process Model
 
-The implemented Runtime uses this deliberately smaller tree:
+The implemented Runtime uses this deliberately smaller core tree. Enabled trusted
+API configuration appends the optional API subtree shown below:
 
 ```text
 Synapse.Supervisor
@@ -201,13 +211,20 @@ Synapse.Supervisor
 |   `-- temporary Real Workspace MutationServer
 |-- Synapse.TaskSupervisor
 |   `-- temporary Agent Task
-`-- Synapse.Runtime.Supervisor
-    `-- one temporary Runtime.RunServer
+|-- Synapse.Runtime.Supervisor
+|   `-- one temporary Runtime.RunServer
+`-- Synapse.API.Supervisor                  optional, :rest_for_one
+    |-- Synapse.API.RunManager
+    |-- Synapse.API.SessionSupervisor
+    |   `-- one temporary Synapse.API.RunSession
+    `-- Bandit loopback listener
 ```
 
 Run handles are returned directly to one owner. Run Events are synchronous and
-in-memory; there is no durable sequence, Registry lookup, subscription, replay,
-daemon protocol, or reconnectable client in the MVP.
+in-memory inside Runtime. The higher API adapter adds ephemeral run lookup,
+subscriptions, sequence numbers, snapshots, and bounded replay. Those survive
+Socket or listener loss, but not RunManager/application restart or completed-run
+eviction; no durable event identity or restart recovery exists.
 
 ## Target Post-MVP OTP Process Model
 
@@ -771,16 +788,21 @@ An MCP adapter can discover remote capabilities and register them in the same to
 
 ## Client And TUI
 
-The BEAM daemon is the source of truth. CLI and TUI applications are disposable clients connected through a language-neutral local protocol.
+The current MVP includes no bundled client. External clients use protocol-v1 text
+JSON over `ws://127.0.0.1:4848/v1/socket`. It supports one active run and bounded
+reconnect replay only while RunManager retains the run. See
+[`docs/learning/API.md`](docs/learning/API.md) for the exact contract.
 
-The protocol should use length-framed JSON over a Unix domain socket. It must support:
+A future persistent daemon may add a deliberately versioned Unix-domain-socket
+transport. That future protocol may support:
 
-- Commands with request IDs.
-- Asynchronous run events.
-- Cancellation.
-- Snapshot retrieval.
-- Resume from an event sequence.
+- the existing request IDs, asynchronous events, cancellation, snapshots, and
+  process-lifetime resume semantics;
+- durable resume across application restart;
 - Interactive extension requests such as select, confirm, and input.
+
+It must not silently reinterpret WebSocket protocol v1 or imply that current replay
+is durable.
 
 The first client should be a basic text and JSON interface. A full-screen TUI can follow after the protocol and event model stabilize.
 
@@ -852,6 +874,13 @@ ambient filesystem and network authority. Healthy-VM cleanup proves the owned
 direct command; escaped descendants, daemonized processes, and uncatchable host or
 VM death remain explicit limitations.
 
+The current local API adds no authentication boundary. Loopback binding and strict
+browser Origin checks reduce accidental exposure, but native clients may omit
+Origin and any same-user process can request all authority allowed by trusted
+server policy. `process.exec` therefore carries the same host authority and
+descendant limitations described above. Protocol v1 accepts no credentials,
+capabilities, Provider modules, callbacks, handles, or Runtime options.
+
 Project trust decides whether project-local code may be loaded. It is not a general tool permission system.
 
 ### Capability enforcement
@@ -885,7 +914,12 @@ Future capability tokens will be unforgeable runtime data attached to a run. Cur
 
 ### Secret broker
 
-Secrets are entered through a trusted local path such as the TUI, local IPC command, operating-system credential provider, or administrative API. They are stored under symbolic names such as `OPENAI_KEY`; the model sees only the symbolic reference when it needs to select a configured provider or tool.
+In the future credential-broker design, secrets are entered through a trusted local
+path such as the TUI, a dedicated IPC command, operating-system credential provider,
+or administrative API. This is not the current WebSocket API, which accepts no
+credentials. Secrets are stored under symbolic names such as `OPENAI_KEY`; the model
+sees only the symbolic reference when it needs to select a configured provider or
+tool.
 
 Secret values must never enter prompts, transcripts, event payloads, command-line arguments, diffs, or ordinary logs. The preferred storage is an operating-system keychain. If encrypted database fields are supported, the database encryption key must live outside that database and files must use owner-only permissions.
 
@@ -1241,7 +1275,8 @@ For a single local daemon, Elixir registries are sufficient for run lookup and l
 ### Phase 6: Product interface
 
 - Build the full-screen Bubble Tea or libvaxis client.
-- Add reconnect, snapshots, event replay, and interactive prompts.
+- Build on the existing process-lifetime reconnect, snapshots, and event replay;
+  add durable restart recovery and interactive prompts deliberately.
 - Add model-comparison and run-evaluation views.
 
 ## Non-Goals For The First Version
@@ -1264,7 +1299,8 @@ Synapse should make autonomous coding attempts boring to recover from:
 - Every accepted result is verified.
 - Every attempt has a known base.
 - Every side effect has an explicit outcome or is marked ambiguous.
-- Every UI can disconnect and reconnect.
+- Every UI can reconnect from retained process-lifetime API state; durable reconnect
+  across restart requires the deferred persistent event store.
 - Every extension update is versioned and reversible.
 - Every failure leaves enough information for the next attempt to improve.
 - Every public API explains its purpose, intended use, and operational contract through LSP documentation.

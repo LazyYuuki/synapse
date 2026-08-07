@@ -12,8 +12,8 @@ MVP.
 
 The checklist is intentionally limited to Runtime. It does not implement Agent
 conversation policy, Provider transport, Tool execution, Workspace file/process
-semantics, CLI parsing or rendering, persistence, verification workflows,
-worktrees, a reconnectable daemon, or the target multi-run coordinator tree.
+semantics, API wire handling or frontend rendering, persistence, verification
+workflows, worktrees, a durable daemon, or the target multi-run coordinator tree.
 
 ## Runtime Outcome
 
@@ -93,7 +93,7 @@ Update this table only when a phase passes its completion gate.
 ## Architectural Position
 
 ```text
-                      CLI or trusted caller
+                  API RunSession or trusted caller
                               |
                               v
                     +-------------------+
@@ -134,7 +134,7 @@ Workspace to become the direct owner of their private workers or ports.
 ## Dependency Direction
 
 ```text
-CLI or trusted adapter
+API RunSession or trusted adapter
   -> Runtime
   -> Run Request and Run Events
   -> Agent Context and Agent Runner
@@ -145,7 +145,7 @@ Runtime
   -X-> Provider request encoding, SSE, Req, Finch, or credentials
   -X-> Tool schemas, argument decoding, or dispatch policy
   -X-> File, System, Port, MuonTrap, or direct project operations
-  -X-> terminal rendering or exit-code policy
+  -X-> API wire mapping, frontend presentation, or workflow result policy
   -X-> persistence, verification, Git, worktrees, or extensions
 ```
 
@@ -184,11 +184,12 @@ contracts. None imports or calls Runtime.
 - A second inactivity timer for operations already bounded by Provider or
   Workspace.
 - Durable event sequence numbers, timestamps, storage, subscriptions, or replay.
-- CLI signals, terminal rendering, or process exit codes.
+- API commands, wire encoding, frontend presentation, or workflow result policy.
 - Verification, acceptance, evidence, commits, or work-item state.
 - Concurrent-run coordination across multiple Handles for the same root.
-- Persistent RunCoordinator, Registry, daemon, local protocol, or reconnectable
-  clients.
+- Persistent RunCoordinator, durable Registry/event store, or reconnectable clients
+  across Manager/application restart. The higher API owns the process-lifetime local
+  protocol and reconnect view.
 
 ## Current Ownership Facts
 
@@ -233,7 +234,7 @@ its ownership model.
 - Runtime validates Run Request and trusted configuration before starting Agent.
 - One temporary RunServer owns cancellation, event tracking, terminal gating,
   await delivery, and the Agent task monitor.
-- The Agent task, not RunServer or the CLI caller, owns the Workspace Handle.
+- The Agent task, not RunServer or the higher adapter caller, owns the Workspace Handle.
 - RunServer starts Agent through `Task.Supervisor.async/3`, traps task exits, and
   never restarts it.
 - Runtime starts Agent with `trap_exit: false`, and production Agent Runner never
@@ -303,7 +304,7 @@ the minimal architecture in `PLAN.md`, not the future persistent-daemon tree in
 | --- | --- | --- |
 | Lifecycle owner | One temporary `Synapse.Runtime.RunServer` GenServer | Cancellation, await, event gating, and crash conversion require an autonomous state owner |
 | Agent execution | One linked TaskSupervisor `async/3` child with `restart: :temporary` and `shutdown: :brutal_kill` | Runner stays synchronous; link prevents orphaning and trapped exits permit conversion |
-| Run lookup | Opaque handle returned directly to one trusted owner/awaiter | Registry and reconnectable lookup are post-MVP |
+| Run lookup | Opaque handle returned directly to one trusted owner/awaiter | Runtime has no Registry; the API may add ephemeral lookup above it |
 | Workspace owner | Agent task PID | Task death activates existing Workspace owner cleanup |
 | Workspace supervision | Real MutationServers start under one DynamicSupervisor with `restart: :temporary` | Makes process ownership visible without replaying side effects |
 | Lower workers | Remain private to Provider and Workspace | Their components already own monitors, timeouts, ports, and cleanup |
@@ -324,7 +325,7 @@ the minimal architecture in `PLAN.md`, not the future persistent-daemon tree in
 | Task restart | Never | Restart would replay Provider or Tool work |
 | RunServer loss | Await returns typed Runtime Error `runtime_lost`; no Run Event guarantee | The outer lifecycle owner, sink, and crash state no longer exist |
 | Concurrent runs | Reject a second active run with `runtime_busy` | Concurrent runs and cross-Handle same-root coordination are MVP non-goals |
-| Synchronous convenience | No `Runtime.run/3` in MVP | Start/cancel/await ownership must remain explicit for CLI cancellation |
+| Synchronous convenience | No `Runtime.run/3` in MVP | Start/cancel/await ownership must remain explicit for owner-only await and delegated cancellation |
 | Persistence | None | Run handle and events are in-memory MVP data |
 
 ### Why RunServer And Agent Task Are Separate
@@ -390,8 +391,9 @@ Synapse.Runtime.await(runtime_run, timeout \\ :infinity)
 #     :await_timeout | :already_awaited | :not_owner | :invalid_run | :invalid_timeout}
 ```
 
-`Runtime.run/3` is not part of the MVP. CLI must retain the handle so Ctrl-C can
-call `cancel/1` while its owner waits through `await/2`.
+`Runtime.run/3` is not part of the MVP. API RunSession retains the owner-only await
+right while one deliberate trusted delegate may retain the same opaque handle only
+to call `cancel/1`.
 
 ### Runtime Run Handle
 
@@ -440,7 +442,8 @@ the same Agent task. Runtime still closes either Handle through
 
 Callbacks, modules, limits, and deadlines are trusted application configuration.
 They never enter Run Request, model context, events, errors, or ordinary
-inspection. Production CLI code must use the default real Workspace opener.
+inspection. Production API configuration must use the default real Workspace
+opener.
 
 The current Workspace open path performs trusted local APFS initialization
 synchronously. Runtime waits for it without a separate timeout because killing
@@ -585,8 +588,9 @@ but no remaining process has enough state to emit an honest Run Event.
 - Never synthesize exact turn accounting after an abnormal exit.
 - Invoke a terminal event through the sink at most once. A callback that performs
   an external side effect and then raises cannot be made exactly-once by Runtime.
-- Durable sequence numbers, timestamps, persistence barriers, replay, and
-  coalescing remain post-MVP.
+- Runtime itself owns no sequence numbers, timestamps, persistence barriers,
+  replay, or coalescing. The MVP API may add bounded ephemeral sequence and replay
+  projections above this sink; durable forms remain post-MVP.
 
 ## Timeout And Activity Rules
 
@@ -654,8 +658,8 @@ toolchain.
   Provider plan against current source.
 - [x] Confirm one temporary RunServer owns lifecycle state and one linked temporary
   Task executes synchronous Agent Runner.
-- [x] Confirm no Registry, persistent coordinator, daemon, or reconnectable client
-  is required.
+- [x] Confirm Runtime requires no Registry, persistent coordinator, daemon, or
+  reconnectable client; a higher adapter may add process-lifetime lookup.
 - [x] Confirm RunServer and real Workspace MutationServers each use a dedicated
   DynamicSupervisor with `restart: :temporary` children.
 - [x] Confirm Provider and Workspace private workers remain component-owned.
@@ -667,7 +671,8 @@ toolchain.
 ### Public API
 
 - [x] Confirm exact `start_run/3`, `cancel/1`, and `await/2` names and return shapes.
-- [x] Defer `run/3`; CLI retains the handle for explicit cancellation.
+- [x] Defer `run/3`; the owner adapter retains the handle and may delegate explicit
+  cancellation to one trusted process.
 - [x] Confirm one owner/awaiter mailbox rule and `:already_awaited` terminal state.
 - [x] Confirm cancellation may be called from another trusted process.
 - [x] Confirm await timeout does not cancel and does not consume the await right.
@@ -848,7 +853,7 @@ toolchain.
 ### Tests
 
 - [x] Start a text-only Fake run and receive an opaque handle.
-- [x] Exact Workspace owner is the Agent task, not RunServer, test, or CLI process.
+- [x] Exact Workspace owner is the Agent task, not RunServer, test, or API process.
 - [x] RunServer owns task monitor, sink, lifecycle tracking, and await delivery.
 - [x] Exact Access mapping for all capability combinations.
 - [x] Agent receives exact trusted Context values.
@@ -1464,7 +1469,8 @@ OS security sandboxes.
 - [x] Why temporary children never restart.
 - [x] Why crash after ToolStarted is ambiguous.
 - [x] Why await timeout does not cancel.
-- [x] Why the MVP has no Registry, daemon, persistence, or reconnectable client.
+- [x] Why Runtime has no Registry, daemon, persistence, or reconnectable client;
+  ephemeral reconnect may be projected by a higher API adapter.
 
 ### Required Diagrams And Examples
 
@@ -1614,8 +1620,10 @@ test, but deterministic Runtime behavior must never require credentials.
 Do not add these before the MVP Runtime is complete:
 
 - Persistent local daemon and Unix socket.
-- Persistent RunCoordinator, durable per-run subtree, or reconnectable run owner.
-- Run Registry, Event Registry, subscriptions, reconnect, replay, or snapshots.
+- Persistent RunCoordinator, durable per-run subtree, or durable reconnectable run
+  owner.
+- Runtime-owned Run/Event Registry, subscriptions, reconnect, replay, or snapshots;
+  the MVP API may project bounded process-lifetime forms above Runtime.
 - Durable event sequence numbers, timestamps, persistence barriers, or telemetry.
 - SQLite sessions, attempts, work items, evidence, or crash recovery.
 - Concurrent runs, same-root coordination across Handles, or run queues beyond

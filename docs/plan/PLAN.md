@@ -2,15 +2,21 @@
 
 ## Goal
 
-Build the smallest version of Synapse that can receive one local prompt, use Tokamak as its model provider, execute basic coding tools inside a workspace, and continue until the model returns a final answer.
+Build the smallest version of Synapse that can receive one local prompt through a
+frontend-agnostic local API, use Tokamak as its model provider, execute basic
+coding tools inside a workspace, and continue until the model returns a final
+answer.
 
 The MVP has one concrete demonstration:
 
-```bash
-TOKAMAK_API_KEY="..." \
-SYNAPSE_MODEL="..." \
-mix synapse.run --cwd /path/to/project \
-  "Read the project, create hello.txt, and verify its contents."
+```text
+TOKAMAK_API_KEY="..." SYNAPSE_MODEL="..." mix synapse.server
+
+Web, TUI, or desktop client
+  -> ws://127.0.0.1:4848/v1/socket
+  -> run.start(prompt, cwd, optional model and budget lowering)
+  -> ordered run events
+  -> one structured run terminal
 ```
 
 To complete that demonstration, Synapse needs exactly six main components:
@@ -20,7 +26,7 @@ To complete that demonstration, Synapse needs exactly six main components:
 3. Tool System
 4. Agent Loop
 5. Runtime
-6. CLI and Event Renderer
+6. Local WebSocket API
 
 Everything else is either a shared data contract or a post-MVP feature.
 
@@ -28,7 +34,7 @@ Everything else is either a shared data contract or a post-MVP feature.
 
 ```text
 +-------------------------+
-| 6. CLI and Renderer     |
+| 6. Local WebSocket API  |
 +------------+------------+
              |
              v
@@ -58,22 +64,25 @@ Runtime starts and monitors the Agent Loop. It passes cancellation references, d
 ## Component Dependency Graph
 
 ```text
-CLI
- |
- v
-Runtime
- |
- v
-Agent Loop
- |       |
- v       v
-Provider Tool Executor
-            |
-            v
-        Built-in Tools
-            |
-            v
-         Workspace
+Web / TUI / Desktop clients
+             |
+             v
+      Local WebSocket API
+             |
+             v
+          Runtime
+             |
+             v
+         Agent Loop
+         |        |
+         v        v
+    Provider   Tool Executor
+                  |
+                  v
+             Built-in Tools
+                  |
+                  v
+              Workspace
 ```
 
 All components share a small set of contracts:
@@ -93,21 +102,29 @@ Raw Tokamak JSON must not cross the Provider boundary. Raw model tool arguments 
 ## Request Lifecycle
 
 ```text
-1. CLI creates Run Request
-2. Runtime starts supervised run
-3. Agent Loop creates Provider Request
-4. Provider streams normalized events
-5. Agent Loop treats the successful terminal Provider Response as the authority
+1. Client sends a versioned `run.start` WebSocket command
+2. API validates the wire message and reserves a server-assigned run ID
+3. API starts one temporary RunSession; that process creates the Run Request
+4. RunSession starts and owns the Runtime handle and owner-only await right
+5. Runtime starts the supervised run
+6. Agent Loop creates Provider Request
+7. Provider streams normalized events
+8. Agent Loop treats the successful terminal Provider Response as the authority
    for final text, complete tool calls, and source order
-6. Agent preflights every call; one-call Executor validates one admitted Call
-7. Built-in Tool prepares one typed Workspace request without a Handle
-8. Static Dispatcher calls the exact Workspace operation under reduced Access
-9. Workspace returns a bounded Workspace result or error
-10. Built-in Presentation creates one paired bounded Tool Result
-11. Agent Loop appends paired tool output to conversation
-12. Agent Loop requests the next model turn
-13. Loop ends on final text or terminal failure
-14. CLI renders result and chooses exit status
+9. Agent preflights every call; one-call Executor validates one admitted Call
+10. Built-in Tool prepares one typed Workspace request without a Handle
+11. Static Dispatcher calls the exact Workspace operation under reduced Access
+12. Workspace returns a bounded Workspace result or error
+13. Built-in Presentation creates one paired bounded Tool Result
+14. Agent Loop appends paired tool output to conversation
+15. Agent Loop requests the next model turn
+16. As Runtime emits progress, API assigns ephemeral sequence numbers, updates
+    its bounded projection, and emits versioned JSON messages
+17. Loop ends on final text or terminal failure
+18. API confirms and emits one ordinary terminal after Runtime cleanup and await;
+    `runtime_lost` is the explicit exception where settlement cannot be proven
+19. A disconnected client may resubscribe while the server process remains alive;
+    disconnect never cancels the run
 ```
 
 ## Component Summary
@@ -119,7 +136,7 @@ Raw Tokamak JSON must not cross the Provider boundary. Raw model tool arguments 
 | Tool System | Expose model-facing tool schemas and dispatch validated calls | Workspace, shared contracts |
 | Agent Loop | Own conversation state and coordinate model-tool turns | Provider, Tool System, shared contracts |
 | Runtime | Supervise run lifetime; own Workspace lifecycle and cancellation; wire time-limit policy | Agent Loop, Workspace, OTP, shared contracts |
-| CLI and Renderer | Convert local user input into a run and run events into terminal output | Runtime, shared contracts |
+| Local WebSocket API | Validate local wire commands, own Runtime sessions, and expose bounded run projections and events | Runtime, Plug/Bandit/WebSock, shared contracts |
 
 ## Shared Contracts
 
@@ -131,7 +148,7 @@ Shared contracts are not a seventh subsystem. They are small structs and types u
 %Synapse.Run.Request{
   id: run_id,
   prompt: prompt,
-  cwd: canonical_workspace,
+  cwd: validated_absolute_workspace_input,
   model: model,
   capabilities: capabilities,
   budget: budget
@@ -272,7 +289,8 @@ wire:     OpenAI Responses
 tools:    canonical flat Responses function tools
 ```
 
-The model is supplied through `--model` or `SYNAPSE_MODEL`. Do not silently depend on an upstream default that can change.
+The model is supplied through `run.start` from the server allowlist or defaults to
+`SYNAPSE_MODEL`. Do not silently depend on an upstream default that can change.
 
 ### Request Encoding
 
@@ -315,7 +333,7 @@ For the MVP, `Synapse.Provider.Credentials` resolves `TOKAMAK_API_KEY` from the 
 
 The key must never be:
 
-- Accepted as a CLI argument.
+- Accepted in an API payload, command argument, or WebSocket header.
 - Added to a general run struct.
 - Included in an inspectable request representation.
 - Inherited by `bash` subprocesses.
@@ -620,7 +638,9 @@ Synapse.Agent
 `-- Synapse.Budget
 ```
 
-For the MVP, one supervised Task can execute the loop. A dedicated GenServer is not required until Synapse needs a persistent daemon, reconnectable clients, or concurrent run control.
+For the MVP, one supervised Task can execute the loop. API reconnect and run
+lookup are projections above Runtime; they do not require Agent to become a
+GenServer or to surrender conversation ownership.
 
 ### Responsibilities
 
@@ -718,7 +738,7 @@ Use only the Fake provider for deterministic loop tests:
 
 - The full coding loop passes deterministically without network access.
 - The same loop completes one real Tokamak coding task.
-- Agent code imports no Req, File, System, or terminal-rendering modules.
+- Agent code imports no Req, File, System, API-wire, or frontend-rendering modules.
 - ExDoc explains state ownership, turn boundaries, context projection, and termination.
 
 ## 5. Runtime
@@ -731,7 +751,7 @@ The Runtime hosts the Agent Loop inside OTP. It owns the outer supervised run
 lifetime, Workspace open/close, persistent cancellation, terminal cleanup, and
 the trusted time-limit policy passed through Agent to Provider and Workspace.
 
-### Supervision Tree
+### Base Supervision Tree
 
 ```text
 Synapse.Application
@@ -744,7 +764,9 @@ Synapse.Application
         `-- Synapse.Runtime.RunServer [temporary per accepted run]
 ```
 
-The tree should stay this small until a real ownership requirement appears.
+This is the API-disabled base infrastructure tree. Step 6 conditionally adds one
+API Supervisor sibling after Runtime; that subtree is documented below and in
+`PLAN-API.md`.
 
 ### Responsibilities
 
@@ -812,99 +834,207 @@ these replay constraints rather than independently retrying Runner or a request.
 
 ### Complete When
 
-- Ctrl-C and programmatic cancellation stop the active owned operation.
+- Programmatic cancellation and application shutdown stop the active owned operation.
 - A hung provider or command cannot hang the VM indefinitely.
 - Worker crashes become understandable terminal results.
 - ExDoc explains every supervised child's purpose and restart policy.
 
-## 6. CLI And Event Renderer
+## 6. Local WebSocket API
+
+Detailed implementation checklist: [`PLAN-API.md`](PLAN-API.md).
 
 ### Purpose
 
-The CLI is the first user interface. It converts trusted local arguments into a Run Request and converts Run Events into readable terminal output.
+The API is the first user-facing adapter. It converts bounded, versioned local
+WebSocket commands into trusted Run Requests and converts typed Run Events and
+terminals into allowlisted JSON. It lets independently implemented web, TUI, and
+desktop clients share one backend contract.
 
-The CLI is an adapter, not the application architecture.
+The API is an adapter above Runtime, not a new owner of Agent, Tool, Workspace,
+or Provider semantics.
+
+### Endpoint And Command
+
+```text
+command:    mix synapse.server
+health:     GET http://127.0.0.1:4848/health
+websocket:  ws://127.0.0.1:4848/v1/socket
+```
+
+The MVP binds only to IPv4 loopback. It serves no frontend assets and exposes no
+remote-listening switch. Browser connections must pass strict local-host Origin
+validation; native clients without `Origin` are accepted only through the
+loopback listener.
+
+API startup is explicit. Ordinary library and test application startup retains the
+completed Runtime tree; `mix synapse.server` enables one conditional API child
+before starting the application.
 
 ### Internal Structure
 
 ```text
-Mix.Tasks.Synapse.Run
-Synapse.CLI.Options
-Synapse.TerminalRenderer
-```
+Synapse.API
+|-- Config
+|-- Supervisor
+|-- SessionSupervisor
+|-- RunManager
+|-- RunSession
+|-- Router
+|-- Socket
+|-- Protocol
+`-- Wire
 
-### Command
+Mix.Tasks.Synapse.Server
+```
 
 ```text
-mix synapse.run --cwd PATH --model MODEL "PROMPT"
+Synapse.Supervisor                         :one_for_one
+|-- completed Workspace/Task/Runtime infrastructure
+`-- Synapse.API.Supervisor [conditional]  :rest_for_one
+    |-- Synapse.API.RunManager
+    |-- Synapse.API.SessionSupervisor
+    |   `-- RunSession [temporary, at most one active]
+    `-- Bandit loopback listener
 ```
+
+RunManager starts before SessionSupervisor so loss of manager state restarts the
+ephemeral API run-owner layer and listener together. The listener stops first on
+shutdown; Runtime and Workspace infrastructure remain available while RunSession
+requests cancellation and lower owners perform bounded cleanup. Terminal delivery
+is not guaranteed during application shutdown.
 
 ### Responsibilities
 
-- Parse `--cwd`, `--model`, and the prompt.
-- Validate the workspace before starting a run.
-- Create the fixed trusted-local capability set.
-- Start the run through Runtime.
-- Subscribe to or receive Run Events.
-- Render text deltas and concise tool progress.
-- Print structured failures without secrets.
-- Map the terminal result to an exit code.
-- Forward Ctrl-C cancellation.
+- Start a loopback Bandit listener through `mix synapse.server`.
+- Upgrade only `/v1/socket` through WebSockAdapter.
+- Decode bounded text JSON frames with string keys.
+- Validate protocol version, message type, request ID, and exact payload shape.
+- Assign run IDs at the server; never trust client-supplied run authority.
+- Reserve at most one active run before starting a temporary RunSession.
+- Make RunSession the `Runtime.start_run/3` caller and owner-only awaiter.
+- Let RunManager retain the opaque Runtime handle only for non-owner cancellation.
+- Keep runs alive when every WebSocket disconnects.
+- Assign monotonically increasing, per-run, in-memory event sequence numbers.
+- Retain bounded run projections and replay windows for process-lifetime reconnect.
+- Serialize Run Events, Agent terminals, and Runtime errors through explicit
+  allowlists rather than generic struct conversion.
+- Coalesce subscriber wakeups and pull bounded replay batches so a slow socket
+  cannot create an unbounded live-event mailbox.
+- Expose one minimal health response without configuration or run content.
 
 ### Must Not
 
-- Call Tokamak directly.
-- Execute tools.
-- Read or edit project files.
-- Own conversation history.
-- Contain agent-loop policy.
-- Accept the API key as a command-line argument.
+- Accept Provider modules, callbacks, Runtime options, Tool capabilities,
+  supervisors, credentials, cancellation handles, or opaque Runtime values over
+  the wire.
+- Define or consume `TOKAMAK_API_KEY` through a frame, URL, cookie, authorization
+  header, WebSocket subprotocol, or any other API credential field.
+- Serialize `Runtime.Run`, Workspace Handles, Provider final responses, prompts,
+  paths in errors, stacktraces, process reasons, or arbitrary structs.
+- Call Provider, Tool, Agent, or Workspace directly.
+- Cancel a run merely because one client disconnects.
+- Claim durable replay, restart recovery, authentication, or network isolation.
+- Serve or build files from `ui/web`, `ui/tui`, or `ui/desktop`.
 
-### Local Capability Set
+### Wire Commands
+
+Client message types:
+
+```text
+run.start
+run.cancel
+run.subscribe
+ping
+```
+
+Server message types:
+
+```text
+server.hello
+server.error
+run.accepted
+run.cancel_requested
+run.snapshot
+run.event
+run.terminal
+pong
+```
+
+Every command uses a bounded `request_id`. The `/v1/socket` path and the envelope
+both identify protocol version 1. Unknown fields and message types are rejected;
+external strings are never converted to atoms.
+
+### Runtime Ownership
+
+```text
+Socket command
+  -> RunManager reserves run and starts RunSession
+  -> RunSession calls Runtime.start_run/3
+  -> RunSession owns Runtime.await/2 for the run lifetime
+  -> RunManager retains opaque handle for Runtime.cancel/1
+  -> Runtime event sink synchronously records one event in RunManager
+  -> RunManager updates bounded projection and wakes subscribers
+  -> RunSession confirms the terminal returned by await
+```
+
+The event sink runs in Runtime's RunServer and must return promptly. It records
+through one bounded RunManager call; it never writes directly to a socket. A
+RunSession remains alive without clients, so WebSocket ownership cannot orphan or
+cancel a run.
+
+### Local Capability Policy
+
+The API constructs one fixed-shape, server-configured trusted-local Tool
+capability set. Production defaults enable:
 
 ```text
 fs.read:<workspace>
 fs.write:<workspace>
 process.exec:<workspace>
-provider.use:tokamak-codex
-secret.use:TOKAMAK_API_KEY
 ```
 
-This is the target local capability vocabulary, not merely prompt instruction.
-Tool Executor will validate it, and Workspace's temporary Access contract will
-enforce its file/process ceiling. The current MVP Provider receives trusted local
-configuration but does not yet consume capability tokens; provider and secret
-capability enforcement remains a deferred credential-broker seam.
+Capability booleans are server startup policy and are never client payload. A
+client may provide prompt, absolute workspace input, an optional bounded model
+selection, and optional Budget values that only lower server policy. Provider and
+credential selection remain trusted server configuration.
 
 Workspace `fs.read` and `fs.write` checks govern its file APIs. MVP
 `process.exec` starts a same-user process and is not an OS filesystem sandbox;
-do not grant it when host-level write denial is required.
+loopback binding and Origin checks do not change that threat model.
 
-### Exit Codes
+### Replay Scope
 
-| Code | Meaning |
-| --- | --- |
-| `0` | Run completed with final output |
-| `1` | Invalid local input or configuration |
-| `2` | Provider authentication or availability failure |
-| `3` | Interrupted or timed out |
-| `4` | Tool or workspace failure prevented completion |
-| `5` | Run budget exhausted |
+Replay is bounded and memory-only. It survives WebSocket disconnect but not API
+manager restart, application restart, host failure, or completed-run eviction.
+When a requested cursor predates retained events, the server sends an
+authoritative reset snapshot rather than pretending the replay is complete.
 
 ### Tests
 
-- Option parsing.
-- Missing prompt, cwd, model, and API key behavior.
-- Event rendering.
-- Secret redaction.
-- Exit-code mapping.
-- Cancellation forwarding.
+- Configuration, loopback binding, and Origin policy.
+- HTTP health, 404, method, and WebSocket upgrade behavior.
+- Envelope and exact payload validation, malformed JSON, binary frames, and size
+  limits.
+- Explicit JSON mapping for every Run Event and terminal shape.
+- RunSession ownership of `start_run/3` and `await/2`.
+- Non-owner cancellation through RunManager.
+- Run continuation after socket disconnect.
+- Ordered sequences, reconnect replay, reset snapshots, and completed-run
+  eviction.
+- Slow-subscriber wakeup coalescing and bounded replay batches.
+- Secret and opaque-authority exclusion from frames, errors, logs, and inspection.
+- Deterministic WebSocket-to-Fake-Runtime integration and opt-in live Tokamak
+  acceptance.
 
 ### Complete When
 
-- The acceptance command can run without calling internal modules manually.
-- Output clearly distinguishes model text, tool activity, and failure.
-- CLI modules remain thin and fully documented.
+- `mix synapse.server` exposes health and the versioned loopback WebSocket.
+- A protocol client can start, observe, disconnect, reconnect, cancel, and receive
+  one terminal for a run without calling internal modules.
+- Disconnect does not cancel the active run.
+- Replay and all connection/run buffers have tested hard bounds.
+- No API frame or log contains a credential or opaque host authority.
+- The API can be understood and implemented from `PLAN-API.md`, LSP, and ExDoc.
 
 ## Component Connections
 
@@ -948,14 +1078,27 @@ Agent emits: Run Events and terminal result
 
 Provider and Workspace receive operation resources through request context. They do not import or call Runtime. Runtime does not interpret model or tool meaning.
 
-### Components To CLI
+### Runtime To API
 
 ```text
-Agent emits Run Events
-CLI Renderer consumes Run Events
+API RunSession creates: validated Run Request + trusted Runtime policy
+Runtime returns: opaque Run handle to RunSession
+Runtime emits: ordered typed Run Events to RunManager
+API exposes: bounded JSON projection, replay, cancellation, and terminal
 ```
 
-No core component prints directly to the terminal.
+Runtime never sees sockets or JSON. RunSession owns the Runtime await right;
+RunManager may cancel using the retained opaque handle but never serializes it.
+
+### API To Frontends
+
+```text
+Web / TUI / Desktop sends: versioned bounded commands
+API sends: versioned snapshots, events, terminals, and protocol errors
+```
+
+No core component renders a frontend or depends on a UI framework. Frontends live
+outside the Elixir backend under `ui/` and connect through the same protocol.
 
 ## Target Source Layout
 
@@ -965,7 +1108,7 @@ public facades currently live at `synapse/provider.ex`, `synapse/workspace.ex`, 
 
 ```text
 lib/
-  mix/tasks/synapse.run.ex
+  mix/tasks/synapse.server.ex
   synapse.ex
   synapse/application.ex
 
@@ -1020,12 +1163,26 @@ lib/
     run_server.ex
     error.ex
 
-  synapse/cli/
-    options.ex
-    terminal_renderer.ex
+  synapse/api/
+    config.ex
+    supervisor.ex
+    session_supervisor.ex
+    run_manager.ex
+    run_session.ex
+    router.ex
+    socket.ex
+    protocol.ex
+    wire.ex
+
+ui/
+  web/
+  tui/
+  desktop/
 ```
 
-Do not create this entire tree before implementation. Add each file only when its component step requires it.
+The `ui/` directories are separate clients, not Mix application source and not
+part of Step 6 implementation. Do not create this entire tree before
+implementation. Add each file only when its component step requires it.
 
 ## Build Order
 
@@ -1124,37 +1281,52 @@ Detailed phase gates: [`PLAN-RUNTIME.md`](PLAN-RUNTIME.md).
 
 Proof: cancellation, timeout, and worker-crash tests leave no owned operation running.
 
-### Step 6: CLI And Acceptance
+### Step 6: Local WebSocket API And Acceptance
 
-- [ ] Implement Mix task and option parsing.
-- [ ] Implement terminal renderer.
-- [ ] Implement exit-code mapping.
-- [ ] Add deterministic fixture project.
-- [x] Add opt-in live Tokamak acceptance test.
-- [ ] Complete ExDoc architecture and lifecycle guides.
+Detailed phase gates: [`PLAN-API.md`](PLAN-API.md).
 
-Proof: the defining MVP command completes against Tokamak and all local verification passes.
+- [x] Complete API Phase 0 protocol, ownership, limits, and local-trust decisions.
+- [x] Add Bandit, Plug, Thousand Island, WebSock, WebSockAdapter, and test-client
+  dependencies.
+- [x] Implement API configuration, conditional startup, and supervision.
+- [x] Implement strict versioned protocol decoding and explicit wire encoding.
+- [x] Implement RunManager bounded state, sequences, projections, and replay.
+- [x] Implement RunSession Runtime ownership, await, cancellation, and settlement.
+- [x] Implement WebSocket connection lifecycle and bounded subscription delivery.
+- [x] Implement loopback Router, health endpoint, and Origin enforcement.
+- [x] Implement `mix synapse.server`.
+- [x] Prove deterministic and opt-in live end-to-end API acceptance.
+- [x] Complete API reliability, security, ExDoc, and comprehension review.
+
+Proof: an external protocol client completes the defining coding run, can
+disconnect and reconnect while it runs, and all local verification passes.
 
 ## Final Acceptance Scenario
 
-```bash
-tmpdir="$(mktemp -d)"
-printf '# Fixture\n' > "$tmpdir/README.md"
-
-TOKAMAK_API_KEY="..." \
-SYNAPSE_MODEL="..." \
-mix synapse.run --cwd "$tmpdir" \
-  "Read README.md, create hello.txt containing hello from Synapse, then run a command that verifies the file contains that exact text."
+```text
+1. Create a temporary fixture containing README.md.
+2. Start `mix synapse.server` with `TOKAMAK_API_KEY` and `SYNAPSE_MODEL`.
+3. Connect a protocol client to `ws://127.0.0.1:4848/v1/socket`.
+4. Send `run.start` with the fixture path and coding prompt.
+5. Observe ordered progress, disconnect, and resubscribe with the last sequence.
+6. Receive one `run.terminal` and inspect the fixture independently.
 ```
 
 The MVP passes when:
 
 - Tokamak streams a valid response.
+- The API assigns the run ID and accepts no credential or capability authority
+  from the client.
 - The model calls at least one built-in tool.
 - `hello.txt` contains the expected content.
 - Bash verification exits successfully.
 - The model reports the actual verification result.
+- WebSocket disconnect does not cancel the run.
+- Reconnect returns either a complete retained replay or an explicit reset
+  snapshot, never a silent sequence gap.
 - The API key is never supplied to model context or child environments and never enters Synapse-generated metadata or logs; process-output event payloads are bounded but untrusted and may contain sensitive data obtained independently by the child.
+- The API key, opaque Runtime Run, Provider final response, Workspace Handle, and
+  trusted callbacks never enter a wire frame.
 - The run terminates without an owned worker remaining.
 - `mix compile --warnings-as-errors` succeeds.
 - `mix format --check-formatted` succeeds.
@@ -1163,8 +1335,11 @@ The MVP passes when:
 
 ## MVP Non-Goals
 
-- Persistent daemon and Unix socket.
-- TUI.
+- Detached persistent daemon, Unix socket, and operating-system service manager.
+- Durable reconnect or replay across API/application restart.
+- Web, TUI, and desktop client implementation.
+- Serving or bundling frontend assets from Synapse.
+- Remote listening, TLS, multi-user authentication, or authorization.
 - SQLite persistence.
 - Worktrees and automatic fresh-attempt retries.
 - Concurrent runs or parallel tools.
@@ -1178,18 +1353,19 @@ The MVP passes when:
 
 ## After The MVP
 
-Build outward from the stable Agent Loop in this order:
+Build outward from the stable API and Agent Loop in this order:
 
-1. Append-only run persistence.
-2. Persistent daemon and reconnectable client.
-3. SQLite sessions.
-4. Autonomous worktrees and fresh-attempt retries.
-5. Source-scoped capability policies.
-6. Keychain-backed credential broker.
-7. OpenAI-compatible providers.
-8. Context compaction.
-9. Hot extension generations.
-10. Full-screen TUI.
+1. Implement independent clients under `ui/web`, `ui/tui`, and `ui/desktop`
+   against protocol v1.
+2. Add append-only run persistence and durable sequence numbers.
+3. Add application-restart recovery and durable reconnect.
+4. Add SQLite sessions.
+5. Add autonomous worktrees and fresh-attempt retries.
+6. Add source-scoped capability policies.
+7. Add a keychain-backed credential broker and authenticated local sessions.
+8. Add OpenAI-compatible providers.
+9. Add context compaction.
+10. Add hot extension generations.
 
 ## Comprehension Gate
 

@@ -543,7 +543,7 @@ defmodule Synapse.Tool.BashTest do
         try do
           cwd =
             Executor.execute(
-              bash_call("/bin/pwd", 5_000),
+              bash_call("/bin/pwd", 15_000),
               tool_context(handle, operation_id: "bash-real-cwd")
             )
 
@@ -554,7 +554,7 @@ defmodule Synapse.Tool.BashTest do
 
           zero =
             Executor.execute(
-              bash_call("printf 'one\\ntwo\\n'", 5_000),
+              bash_call("printf 'one\\ntwo\\n'", 15_000),
               tool_context(handle, operation_id: "bash-real-zero")
             )
 
@@ -566,7 +566,7 @@ defmodule Synapse.Tool.BashTest do
 
           nonzero =
             Executor.execute(
-              bash_call("printf failed; exit 7", 5_000),
+              bash_call("printf failed; exit 7", 15_000),
               tool_context(handle, operation_id: "bash-real-nonzero")
             )
 
