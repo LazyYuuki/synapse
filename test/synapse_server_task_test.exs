@@ -117,7 +117,7 @@ defmodule Mix.Tasks.Synapse.ServerTest do
     executable = mix_executable()
 
     expression =
-      "Application.put_env(:synapse, :api, port: 0, default_model: \"model-a\"); " <>
+      "Application.put_env(:synapse, :api, port: 0, launch_cwd: \"/stale/configured/path\", default_model: \"model-a\"); " <>
         "Mix.Tasks.Synapse.Server.run([])"
 
     server =
@@ -127,7 +127,7 @@ defmodule Mix.Tasks.Synapse.ServerTest do
         :stderr_to_stdout,
         {:cd, project_root()},
         {:args, ["run", "--no-start", "-e", expression]},
-        {:env, [{~c"MIX_ENV", ~c"test"}]}
+        {:env, [{~c"MIX_ENV", ~c"test"}, {~c"SYNAPSE_MAX_OUTPUT_BYTES", ~c"262144"}]}
       ])
 
     {:os_pid, os_pid} = List.keyfind(Port.info(server), :os_pid, 0)
@@ -157,6 +157,30 @@ defmodule Mix.Tasks.Synapse.ServerTest do
 
     assert_receive {:gun_data, ^connection, ^stream, :fin, ~s({"status":"ok","protocol":1})},
                    5_000
+
+    websocket =
+      :gun.ws_upgrade(
+        connection,
+        "/v1/socket",
+        [{"host", "127.0.0.1:#{port_number}"}],
+        %{}
+      )
+
+    assert_receive {:gun_upgrade, ^connection, ^websocket, ["websocket"], _headers}, 5_000
+    assert_receive {:gun_ws, ^connection, ^websocket, {:text, hello}}, 5_000
+
+    assert JSON.decode!(hello) == %{
+             "version" => 1,
+             "type" => "server.hello",
+             "request_id" => nil,
+             "payload" => %{
+               "protocol" => 1,
+               "replay" => "memory",
+               "max_active_runs" => 1,
+               "cwd" => project_root(),
+               "max_output_bytes" => 262_144
+             }
+           }
 
     :gun.close(connection)
     {_output, 0} = System.cmd("kill", ["-TERM", Integer.to_string(os_pid)])

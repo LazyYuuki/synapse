@@ -295,7 +295,7 @@ current Provider event pattern.
   max_wall_time_ms: 900_000,
   provider_inactivity_ms: 120_000,
   tool_inactivity_ms: 180_000,
-  max_output_bytes: 64_000,
+  max_output_bytes: 524_288,
   max_provider_retries: 2
 }
 ```
@@ -309,6 +309,11 @@ Run Request contract separately.
 Provider and Tool retain their own lower-level hard ceilings. Agent Budget may
 lower effective inactivity or output policy but cannot enlarge those component
 limits.
+
+The loopback WebSocket API exposes at most 524,288 aggregate bytes even though the
+core Budget type retains a 4,194,304-byte trusted-caller ceiling. Larger core
+Budgets require a caller whose transport, retained state, and Provider request
+limits are sized for them.
 
 Initial hard Budget ceilings:
 

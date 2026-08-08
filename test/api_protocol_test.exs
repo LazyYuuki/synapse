@@ -295,7 +295,13 @@ defmodule Synapse.API.ProtocolTest do
     prompt = String.duplicate(<<0>>, 262_144)
     model = String.duplicate("\\", 256)
     cwd = "/" <> String.duplicate("\\", 4_095)
-    {:ok, config} = Config.new(enabled: true, default_model: model)
+
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-protocol-launch",
+        default_model: model
+      )
 
     message =
       JSON.encode!(%{
@@ -324,6 +330,7 @@ defmodule Synapse.API.ProtocolTest do
     {:ok, config} =
       Config.new(
         enabled: true,
+        launch_cwd: "/synthetic/api-protocol-launch",
         default_model: "model-a",
         max_json_object_keys: 7,
         max_json_array_elements: 1,
@@ -343,7 +350,12 @@ defmodule Synapse.API.ProtocolTest do
              decode(%{"type" => "ping", "payload" => %{"items" => [1, 2]}}, config)
 
     {:ok, nodes_config} =
-      Config.new(enabled: true, default_model: "model-a", max_json_nodes: 16)
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-protocol-launch",
+        default_model: "model-a",
+        max_json_nodes: 16
+      )
 
     assert {:error, :invalid_payload, "request-1"} =
              decode(
@@ -454,7 +466,13 @@ defmodule Synapse.API.ProtocolTest do
   end
 
   defp config do
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a")
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-protocol-launch",
+        default_model: "model-a"
+      )
+
     config
   end
 

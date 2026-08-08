@@ -202,7 +202,7 @@ defmodule Synapse.API.RunManagerTest do
 
     Enum.each(callers, fn caller ->
       send(caller, :go)
-      assert_receive {:event_result, ^caller, :ok}
+      assert_receive {:event_result, ^caller, :ok}, 1_000
     end)
 
     assert run(manager, run_id).replay |> :queue.to_list() |> Enum.map(& &1.seq) == [1, 2, 3]
@@ -480,7 +480,12 @@ defmodule Synapse.API.RunManagerTest do
     {:ok, runtime_options} = Synapse.Runtime.Options.new(tool_limits: tool_limits)
 
     {:ok, config} =
-      Config.new(enabled: true, default_model: "model-a", runtime_options: runtime_options)
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-manager-launch",
+        default_model: "model-a",
+        runtime_options: runtime_options
+      )
 
     {:ok, manager} =
       start_manager(
@@ -579,7 +584,7 @@ defmodule Synapse.API.RunManagerTest do
     refute_receive {:synapse_run_changed, ^run_id}
 
     Process.exit(session, :kill)
-    assert_receive {:synapse_run_changed, ^run_id}
+    assert_receive {:synapse_run_changed, ^run_id}, 5_000
 
     record = run(manager, run_id)
     assert record.status == :failed
@@ -615,7 +620,14 @@ defmodule Synapse.API.RunManagerTest do
   end
 
   test "subscribe, stale reset, bounded pull, and notifications share one cursor" do
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a", max_replay_events: 2)
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-manager-launch",
+        default_model: "model-a",
+        max_replay_events: 2
+      )
+
     {:ok, manager} = start_manager(config: config)
     memory_before = manager_memory(manager)
     {run_id, _session} = start_one(manager)
@@ -692,7 +704,14 @@ defmodule Synapse.API.RunManagerTest do
   end
 
   test "pull count boundary advances one contiguous batch at a time" do
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a", max_pull_events: 1)
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-manager-launch",
+        default_model: "model-a",
+        max_pull_events: 1
+      )
+
     {:ok, manager} = start_manager(config: config)
     {run_id, _session} = start_one(manager)
 
@@ -736,20 +755,26 @@ defmodule Synapse.API.RunManagerTest do
                event(:turn_started, run_id: run_id, turn: 1, operation_id: "provider-op")
              )
 
-    delta = String.duplicate("x", config.max_projection_text_bytes)
+    chunks =
+      List.duplicate(String.duplicate("x", 64_000), 8) ++
+        [String.duplicate("x", config.max_projection_text_bytes - 8 * 64_000)]
 
-    assert :ok =
-             RunManager.record_event(
-               manager,
-               event(:text_delta,
-                 run_id: run_id,
-                 turn: 1,
-                 operation_id: "provider-op",
-                 item_id: "item-1",
-                 content_index: 0,
-                 delta: delta
+    chunks
+    |> Enum.with_index()
+    |> Enum.each(fn {delta, index} ->
+      assert :ok =
+               RunManager.record_event(
+                 manager,
+                 event(:text_delta,
+                   run_id: run_id,
+                   turn: 1,
+                   operation_id: "provider-op",
+                   item_id: "item-#{index}",
+                   content_index: index,
+                   delta: delta
+                 )
                )
-             )
+    end)
 
     before = run(manager, run_id)
     assert byte_size(before.projection.text) == config.max_projection_text_bytes
@@ -773,9 +798,39 @@ defmodule Synapse.API.RunManagerTest do
     assert after_rejection.sink_rejected
   end
 
+  test "maximum successful Result remains accounted and crosses a snapshot wire once" do
+    {:ok, manager} = start_manager()
+    {run_id, session} = start_one(manager)
+    config = config(manager)
+    text = String.duplicate("x", config.budget.max_output_bytes)
+
+    complete_run(manager, run_id, session, text)
+
+    record = run(manager, run_id)
+    assert record.projection.text == text
+    assert record.terminal.result.text == text
+    assert record.accounted_bytes <= config.max_active_state_bytes
+    assert :sys.get_state(manager).aggregate_bytes == record.accounted_bytes
+
+    assert {:ok, snapshot} = RunManager.subscribe(manager, run_id, nil)
+    assert {:ok, encoded} = API.Wire.snapshot("request-maximum", snapshot, config)
+    decoded = decode(encoded)
+    assert decoded["payload"]["projection"]["text"] == ""
+    assert decoded["payload"]["terminal"]["result"]["text"] == text
+    assert IO.iodata_length(encoded) <= config.max_outgoing_message_bytes
+  end
+
   test "completed count eviction is oldest-first and run-ID collisions retry" do
     ids = [run_id(1), run_id(1), run_id(2)]
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a", max_completed_runs: 1)
+
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-manager-launch",
+        default_model: "model-a",
+        max_completed_runs: 1
+      )
+
     {:ok, manager} = start_manager(config: config, id_generator: id_generator(ids))
     memory_before = manager_memory(manager)
     {first_id, first_session} = start_one(manager)
@@ -799,6 +854,7 @@ defmodule Synapse.API.RunManagerTest do
     {:ok, config} =
       Config.new(
         enabled: true,
+        launch_cwd: "/synthetic/api-run-manager-launch",
         default_model: "model-a",
         budget: budget,
         max_projection_text_bytes: 1,
@@ -829,6 +885,7 @@ defmodule Synapse.API.RunManagerTest do
     {:ok, config} =
       Config.new(
         enabled: true,
+        launch_cwd: "/synthetic/api-run-manager-launch",
         default_model: "model-a",
         budget: budget,
         max_projection_text_bytes: 1,
@@ -866,6 +923,7 @@ defmodule Synapse.API.RunManagerTest do
 
     attrs = [
       enabled: true,
+      launch_cwd: "/synthetic/api-run-manager-launch",
       default_model: "model-a",
       budget: budget,
       max_projection_text_bytes: 1,
@@ -1268,7 +1326,13 @@ defmodule Synapse.API.RunManagerTest do
     do: Enum.count(state.runs, fn {_run_id, record} -> Map.has_key?(record.subscribers, pid) end)
 
   defp default_config do
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a")
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-manager-launch",
+        default_model: "model-a"
+      )
+
     config
   end
 

@@ -19,7 +19,7 @@ defmodule Synapse.API.Protocol do
 
   ## Example
 
-      iex> {:ok, config} = Synapse.API.Config.new(enabled: true, default_model: "model-a")
+      iex> {:ok, config} = Synapse.API.Config.new(enabled: true, launch_cwd: "/tmp/project", default_model: "model-a")
       iex> message = ~s({"version":1,"type":"run.start","request_id":"request-1","payload":{"prompt":"Inspect","cwd":"/tmp/project"}})
       iex> {:ok, {"request-1", %Synapse.API.Command.Start{} = start}} =
       ...>   Synapse.API.Protocol.decode(message, config)

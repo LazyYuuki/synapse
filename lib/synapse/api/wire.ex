@@ -45,7 +45,7 @@ defmodule Synapse.API.Wire do
 
   alias Synapse.Agent.Error, as: AgentError
   alias Synapse.API.Command.Cancel
-  alias Synapse.API.{ActiveTool, ConfirmedTerminal, Policy, Projection, TerminalError}
+  alias Synapse.API.{ActiveTool, Config, ConfirmedTerminal, Policy, Projection, TerminalError}
   alias Synapse.Run.Event
 
   alias Synapse.Run.Event.{
@@ -144,11 +144,18 @@ defmodule Synapse.API.Wire do
   @doc "Encodes the first message sent after a successful WebSocket upgrade."
   @spec hello(struct()) :: encode_result()
   def hello(config) do
-    if Policy.valid?(config) do
-      payload = %{"protocol" => 1, "replay" => "memory", "max_active_runs" => 1}
-      encode("server.hello", nil, payload, config)
+    with {:ok, policy} <- hello_policy(config) do
+      payload = %{
+        "protocol" => 1,
+        "replay" => "memory",
+        "max_active_runs" => 1,
+        "cwd" => policy.launch_cwd,
+        "max_output_bytes" => policy.budget.max_output_bytes
+      }
+
+      encode("server.hello", nil, payload, policy)
     else
-      {:error, :invalid_message}
+      _invalid -> {:error, :invalid_message}
     end
   end
 
@@ -242,7 +249,7 @@ defmodule Synapse.API.Wire do
         "run_id" => attrs.run_id,
         "first_available_seq" => attrs.first_available_seq,
         "last_seq" => attrs.last_seq,
-        "projection" => optional_projection_payload(attrs.projection),
+        "projection" => optional_projection_payload(attrs.projection, attrs.terminal),
         "terminal" => terminal
       }
 
@@ -482,18 +489,40 @@ defmodule Synapse.API.Wire do
   defp snapshot_terminal_matches?(%{terminal: nil, projection: projection}, _config),
     do: projection.status not in [:completed, :failed, :interrupted]
 
-  defp snapshot_terminal_matches?(%{terminal: %ConfirmedTerminal{} = terminal} = attrs, config),
-    do:
-      ConfirmedTerminal.valid?(terminal, config) and terminal.run_id == attrs.run_id and
-        terminal.seq == attrs.last_seq and terminal.status == attrs.projection.status
+  defp snapshot_terminal_matches?(%{terminal: %ConfirmedTerminal{} = terminal} = attrs, config) do
+    ConfirmedTerminal.valid?(terminal, config) and terminal.run_id == attrs.run_id and
+      terminal.seq == attrs.last_seq and terminal.status == attrs.projection.status and
+      completed_snapshot_matches?(attrs.projection, terminal)
+  end
 
   defp snapshot_terminal_matches?(_attrs, _config), do: false
 
   defp snapshot_mode(:snapshot), do: "snapshot"
   defp snapshot_mode(:replay), do: "replay"
 
-  defp optional_projection_payload(nil), do: nil
-  defp optional_projection_payload(%Projection{} = projection), do: projection_payload(projection)
+  defp completed_snapshot_matches?(projection, %ConfirmedTerminal{
+         status: :completed,
+         result: result
+       }),
+       do:
+         projection.active_tool == nil and projection.turn == result.turns and
+           projection.text == result.text and
+           projection.provider_attempts == result.turns + result.provider_retries and
+           projection.tool_calls == result.tool_calls and
+           projection.output_bytes == result.output_bytes
+
+  defp completed_snapshot_matches?(projection, %ConfirmedTerminal{}),
+    do: projection.active_tool == nil
+
+  defp optional_projection_payload(nil, _terminal), do: nil
+
+  defp optional_projection_payload(%Projection{} = projection, %ConfirmedTerminal{
+         status: :completed
+       }),
+       do: projection_payload(%{projection | text: ""})
+
+  defp optional_projection_payload(%Projection{} = projection, _terminal),
+    do: projection_payload(projection)
 
   defp projection_payload(projection) do
     %{
@@ -615,6 +644,14 @@ defmodule Synapse.API.Wire do
 
   defp cursor?(value), do: Validation.int64?(value) and value >= 0
   defp positive_int64?(value), do: Validation.int64?(value) and value > 0
+
+  defp hello_policy(%Config{} = config), do: Policy.from_config(config)
+
+  defp hello_policy(%Policy{} = policy) do
+    if Policy.valid?(policy), do: {:ok, policy}, else: {:error, :invalid_message}
+  end
+
+  defp hello_policy(_config), do: {:error, :invalid_message}
 
   defp encode(type, request_id, payload, config) do
     if Policy.valid?(config) do

@@ -3,7 +3,7 @@ defmodule Synapse.API.WireTest do
 
   alias Synapse.Agent.{Error, Result}
   alias Synapse.API
-  alias Synapse.API.{Config, ConfirmedTerminal, PendingTerminal, Wire}
+  alias Synapse.API.{Config, ConfirmedTerminal, PendingTerminal, Policy, Wire}
   alias Synapse.Budget
   alias Synapse.Provider
   alias Synapse.Run.Event
@@ -18,7 +18,7 @@ defmodule Synapse.API.WireTest do
 
     assert_frame(
       Wire.hello(config),
-      ~S({"version":1,"type":"server.hello","request_id":null,"payload":{"protocol":1,"replay":"memory","max_active_runs":1}}),
+      ~S({"version":1,"type":"server.hello","request_id":null,"payload":{"protocol":1,"replay":"memory","max_active_runs":1,"cwd":"/synthetic/api-wire-launch","max_output_bytes":524288}}),
       config
     )
 
@@ -84,6 +84,15 @@ defmodule Synapse.API.WireTest do
       ~S({"version":1,"type":"pong","request_id":"request-4","payload":{}}),
       config
     )
+  end
+
+  test "hello rejects Config and Policy values without a bounded launch directory" do
+    assert {:error, :invalid_api_policy} = Policy.from_config(Config.default())
+    assert {:error, :invalid_message} = Wire.hello(Config.default())
+
+    config = config()
+    assert {:ok, policy} = Policy.from_config(config)
+    assert {:error, :invalid_message} = Wire.hello(%{policy | launch_cwd: nil})
   end
 
   test "every server error code has fixed prose and retry policy" do
@@ -190,9 +199,11 @@ defmodule Synapse.API.WireTest do
     completed_projection = %{
       projection
       | status: :completed,
+        turn: 1,
         active_tool: nil,
         text: "done",
         provider_attempts: 1,
+        tool_calls: 0,
         output_bytes: 4
     }
 
@@ -214,6 +225,7 @@ defmodule Synapse.API.WireTest do
 
     assert completed["payload"]["terminal"] == terminal_payload_fixture(run_id, 4)
     assert completed["payload"]["projection"]["status"] == "completed"
+    assert completed["payload"]["projection"]["text"] == ""
   end
 
   test "encodes every concrete progress event and owner loss field by field" do
@@ -646,6 +658,7 @@ defmodule Synapse.API.WireTest do
     {:ok, tight} =
       Config.new(
         enabled: true,
+        launch_cwd: "/synthetic/api-wire-launch",
         default_model: "model-a",
         budget: budget,
         max_projection_text_bytes: 1,
@@ -678,6 +691,7 @@ defmodule Synapse.API.WireTest do
     config = config()
     run_id = run_id()
     escaped_delta = String.duplicate(<<0>>, 64_000)
+    maximum_text = String.duplicate(<<0>>, config.budget.max_output_bytes)
 
     {:ok, delta} =
       Event.new(:text_delta,
@@ -736,12 +750,12 @@ defmodule Synapse.API.WireTest do
     {:ok, result} =
       Result.new(
         run_id: run_id,
-        text: escaped_delta,
+        text: maximum_text,
         final_response: response,
         turns: 1,
         tool_calls: 0,
         provider_retries: 0,
-        output_bytes: byte_size(escaped_delta)
+        output_bytes: byte_size(maximum_text)
       )
 
     {:ok, terminal_event} = Event.new(:run_completed, run_id: run_id, result: result)
@@ -749,16 +763,16 @@ defmodule Synapse.API.WireTest do
     {:ok, terminal} = ConfirmedTerminal.from_pending(pending, 3, config)
     assert {:ok, terminal_frame} = Wire.terminal(terminal, config)
     decoded_terminal = decode_frame!({:ok, terminal_frame})
-    assert decoded_terminal["payload"]["result"]["text"] == escaped_delta
+    assert decoded_terminal["payload"]["result"]["text"] == maximum_text
 
     projection = %{
       API.Projection.new()
       | status: :completed,
         model: "model-a",
         turn: 1,
-        text: escaped_delta,
+        text: maximum_text,
         provider_attempts: 1,
-        output_bytes: byte_size(escaped_delta)
+        output_bytes: byte_size(maximum_text)
     }
 
     assert {:ok, snapshot_frame} =
@@ -777,16 +791,13 @@ defmodule Synapse.API.WireTest do
              )
 
     snapshot = decode_frame!({:ok, snapshot_frame})
-    assert snapshot["payload"]["projection"]["text"] == escaped_delta
-    assert snapshot["payload"]["terminal"]["result"]["text"] == escaped_delta
+    assert snapshot["payload"]["projection"]["text"] == ""
+    assert snapshot["payload"]["terminal"]["result"]["text"] == maximum_text
 
-    assert Enum.flat_map(
-             [decoded_delta, decoded_terminal, snapshot],
-             &value_paths(&1, escaped_delta)
-           )
+    assert value_paths(decoded_delta, escaped_delta) == [["payload", "event", "delta"]]
+
+    assert Enum.flat_map([decoded_terminal, snapshot], &value_paths(&1, maximum_text))
            |> Enum.sort() == [
-             ["payload", "event", "delta"],
-             ["payload", "projection", "text"],
              ["payload", "result", "text"],
              ["payload", "terminal", "result", "text"]
            ]
@@ -797,6 +808,7 @@ defmodule Synapse.API.WireTest do
 
     attrs = [
       enabled: true,
+      launch_cwd: "/synthetic/api-wire-launch",
       default_model: "model-a",
       budget: budget,
       max_projection_text_bytes: 1,
@@ -933,7 +945,13 @@ defmodule Synapse.API.WireTest do
   end
 
   defp config do
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a")
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-wire-launch",
+        default_model: "model-a"
+      )
+
     config
   end
 

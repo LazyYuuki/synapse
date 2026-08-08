@@ -65,19 +65,19 @@ real workspace.
 
 ## Progress Summary
 
-| Phase | Deliverable | Status |
-| --- | --- | --- |
-| 0 | Confirm dependencies, protocol, ownership, limits, and trust policy | Complete |
-| 1 | API configuration and internal contracts | Complete |
-| 2 | Strict protocol decoder and explicit wire encoder | Complete |
-| 3 | Bounded RunManager projections, replay, and subscriptions | Complete |
-| 4 | RunSession Runtime ownership and settlement | Complete |
-| 5 | WebSocket lifecycle and bounded delivery | Complete |
-| 6 | Router, supervision, and `mix synapse.server` | Complete |
-| 7 | Deterministic end-to-end acceptance | Complete |
-| 8 | Reliability and security hardening | Complete |
-| 9 | Live Tokamak acceptance | Complete |
-| 10 | ExDoc and comprehension review | Complete |
+| Phase | Deliverable                                                         | Status   |
+| ----- | ------------------------------------------------------------------- | -------- |
+| 0     | Confirm dependencies, protocol, ownership, limits, and trust policy | Complete |
+| 1     | API configuration and internal contracts                            | Complete |
+| 2     | Strict protocol decoder and explicit wire encoder                   | Complete |
+| 3     | Bounded RunManager projections, replay, and subscriptions           | Complete |
+| 4     | RunSession Runtime ownership and settlement                         | Complete |
+| 5     | WebSocket lifecycle and bounded delivery                            | Complete |
+| 6     | Router, supervision, and `mix synapse.server`                       | Complete |
+| 7     | Deterministic end-to-end acceptance                                 | Complete |
+| 8     | Reliability and security hardening                                  | Complete |
+| 9     | Live Tokamak acceptance                                             | Complete |
+| 10    | ExDoc and comprehension review                                      | Complete |
 
 Update this table only when a phase passes its completion gate.
 
@@ -227,47 +227,47 @@ API
 
 ## Internal Modules
 
-| Module | Purpose |
-| --- | --- |
-| `Synapse.API.Config` | Validated startup policy and all API hard limits |
-| `Synapse.API.Supervisor` | API manager, session owner, and listener lifecycle |
-| `Synapse.API.SessionSupervisor` | Temporary RunSession children, maximum one active |
-| `Synapse.API.RunManager` | Run reservation, handles, projections, replay, subscribers, eviction |
-| `Synapse.API.RunSession` | Run Request construction and Runtime start/await ownership |
-| `Synapse.API.Protocol` | Pure strict client-envelope and payload decoding |
-| `Synapse.API.Wire` | Pure explicit server-envelope, event, and terminal encoding |
-| `Synapse.API.Socket` | WebSock connection state, commands, cursors, and bounded pulls |
-| `Synapse.API.Router` | Health route, upgrade route, and local request policy |
-| `Mix.Tasks.Synapse.Server` | Explicit server startup and foreground lifetime |
+| Module                          | Purpose                                                              |
+| ------------------------------- | -------------------------------------------------------------------- |
+| `Synapse.API.Config`            | Validated startup policy and all API hard limits                     |
+| `Synapse.API.Supervisor`        | API manager, session owner, and listener lifecycle                   |
+| `Synapse.API.SessionSupervisor` | Temporary RunSession children, maximum one active                    |
+| `Synapse.API.RunManager`        | Run reservation, handles, projections, replay, subscribers, eviction |
+| `Synapse.API.RunSession`        | Run Request construction and Runtime start/await ownership           |
+| `Synapse.API.Protocol`          | Pure strict client-envelope and payload decoding                     |
+| `Synapse.API.Wire`              | Pure explicit server-envelope, event, and terminal encoding          |
+| `Synapse.API.Socket`            | WebSock connection state, commands, cursors, and bounded pulls       |
+| `Synapse.API.Router`            | Health route, upgrade route, and local request policy                |
+| `Mix.Tasks.Synapse.Server`      | Explicit server startup and foreground lifetime                      |
 
 Do not generate empty modules. Add each module in its implementation phase.
 
 ## Confirmed MVP Decision Record
 
-| Concern | MVP decision | Reason |
-| --- | --- | --- |
-| Server command | `mix synapse.server` | Keeps API startup explicit |
-| Bind address | `127.0.0.1` only | No accidental LAN exposure |
-| Default port | `4848` | Stable endpoint for separate clients |
-| Health route | `GET /health` | Minimal readiness without run data |
-| WebSocket route | `/v1/socket` | Major protocol version is visible before upgrade |
-| HTTP stack | Bandit and Plug | Small native Elixir server boundary |
-| WebSocket stack | WebSock and WebSockAdapter | Framework-neutral socket callbacks and Plug upgrade |
-| JSON implementation | Elixir `JSON` | No extra JSON dependency on the supported toolchain |
-| Messages | Text JSON only; compression disabled | One bounded inspectable language-neutral protocol |
-| Active runs | One | Matches Runtime's one-active-run MVP contract |
-| Run IDs | Server-assigned random URL-safe IDs | Clients cannot choose or collide with run authority |
-| Await owner | One temporary RunSession | Preserves Runtime mailbox ownership exactly |
-| Cancellation holder | RunManager | Any connected local client can request cancellation by run ID |
-| Disconnect | Run continues | Socket lifetime is not run lifetime |
-| Replay | Bounded RunManager memory only | Supports reconnect without claiming durability |
-| Slow clients | Coalesced notification plus bounded pull | Avoids unbounded socket mailboxes |
-| Origin | Strict local-host validation; absent accepted | Supports local browsers and native clients on loopback |
-| Authentication | None in MVP | Loopback local-user trust only, documented honestly |
-| Model selection | Configured allowlist only | A string cannot choose a module or unknown billing resource |
-| Capabilities | Fixed-shape server policy, all enabled by production default | Client JSON never grants host authority |
-| Budgets | Optional lowering only | Clients may request less work but not enlarge policy |
-| Frontend assets | Never served | API remains frontend-agnostic |
+| Concern             | MVP decision                                                 | Reason                                                        |
+| ------------------- | ------------------------------------------------------------ | ------------------------------------------------------------- |
+| Server command      | `mix synapse.server`                                         | Keeps API startup explicit                                    |
+| Bind address        | `127.0.0.1` only                                             | No accidental LAN exposure                                    |
+| Default port        | `4848`                                                       | Stable endpoint for separate clients                          |
+| Health route        | `GET /health`                                                | Minimal readiness without run data                            |
+| WebSocket route     | `/v1/socket`                                                 | Major protocol version is visible before upgrade              |
+| HTTP stack          | Bandit and Plug                                              | Small native Elixir server boundary                           |
+| WebSocket stack     | WebSock and WebSockAdapter                                   | Framework-neutral socket callbacks and Plug upgrade           |
+| JSON implementation | Elixir `JSON`                                                | No extra JSON dependency on the supported toolchain           |
+| Messages            | Text JSON only; compression disabled                         | One bounded inspectable language-neutral protocol             |
+| Active runs         | One                                                          | Matches Runtime's one-active-run MVP contract                 |
+| Run IDs             | Server-assigned random URL-safe IDs                          | Clients cannot choose or collide with run authority           |
+| Await owner         | One temporary RunSession                                     | Preserves Runtime mailbox ownership exactly                   |
+| Cancellation holder | RunManager                                                   | Any connected local client can request cancellation by run ID |
+| Disconnect          | Run continues                                                | Socket lifetime is not run lifetime                           |
+| Replay              | Bounded RunManager memory only                               | Supports reconnect without claiming durability                |
+| Slow clients        | Coalesced notification plus bounded pull                     | Avoids unbounded socket mailboxes                             |
+| Origin              | Strict local-host validation; absent accepted                | Supports local browsers and native clients on loopback        |
+| Authentication      | None in MVP                                                  | Trusted local-host reachability only, documented honestly     |
+| Model selection     | Configured allowlist only                                    | A string cannot choose a module or unknown billing resource   |
+| Capabilities        | Fixed-shape server policy, all enabled by production default | Client JSON never grants host authority                       |
+| Budgets             | Optional lowering only                                       | Clients may request less work but not enlarge policy          |
+| Frontend assets     | Never served                                                 | API remains frontend-agnostic                                 |
 
 Phase 0 selected compatible dependency constraints from current Hex metadata and
 resolved them in `mix.lock`; the exact record follows.
@@ -277,14 +277,14 @@ resolved them in `mix.lock`; the exact record follows.
 The project was verified with Elixir 1.20.2 and OTP 28. The selected packages,
 constraints, and resolved versions are:
 
-| Dependency | Constraint | Resolved | Scope and reason |
-| --- | --- | --- | --- |
-| Bandit | `~> 1.12.4` | 1.12.4 | Runtime listener and WebSocket transport |
-| Plug | `~> 1.20.3` | 1.20.3 | Direct Router and connection API |
-| Thousand Island | `~> 1.5.0` | 1.5.0 | Direct listener discovery and transport policy API |
-| WebSock | `~> 0.5.3` | 0.5.3 | Direct Socket behavior contract |
-| WebSockAdapter | `~> 0.6.0` | 0.6.0 | Direct Plug-to-WebSock upgrade API |
-| Gun | `~> 2.5` | 2.5.0 | Test-only loopback WebSocket client |
+| Dependency      | Constraint  | Resolved | Scope and reason                                   |
+| --------------- | ----------- | -------- | -------------------------------------------------- |
+| Bandit          | `~> 1.12.4` | 1.12.4   | Runtime listener and WebSocket transport           |
+| Plug            | `~> 1.20.3` | 1.20.3   | Direct Router and connection API                   |
+| Thousand Island | `~> 1.5.0`  | 1.5.0    | Direct listener discovery and transport policy API |
+| WebSock         | `~> 0.5.3`  | 0.5.3    | Direct Socket behavior contract                    |
+| WebSockAdapter  | `~> 0.6.0`  | 0.6.0    | Direct Plug-to-WebSock upgrade API                 |
+| Gun             | `~> 2.5`    | 2.5.0    | Test-only loopback WebSocket client                |
 
 Bandit transitively depends on Plug, Thousand Island, and WebSock, and
 WebSockAdapter depends on Plug and WebSock, but Synapse declares every package
@@ -394,47 +394,50 @@ tree unchanged and does not open a network listener.
 
 ## Hard Limits
 
-| Resource | MVP limit |
-| --- | ---: |
-| Incoming assembled WebSocket text message | 2,097,152 encoded bytes |
-| Individual incoming frame payload | 2,097,152 bytes |
-| Outgoing WebSocket text message | 1,048,576 encoded bytes |
-| API prompt | 262,144 UTF-8 bytes |
-| Request ID | 128 printable UTF-8 bytes |
-| Run ID | 64 printable ASCII bytes |
-| Origin header | 512 bytes |
-| JSON nesting depth | 16 |
-| JSON object keys | 32 per object |
-| JSON array elements | 128 per array |
-| Aggregate decoded JSON nodes | 4,096 |
-| HTTP/1 request line | 8,192 wire bytes |
-| HTTP header count | 32 |
-| Aggregate HTTP/1 header name/value upper bound | 32,768 wire bytes |
-| Connection inbound-inactivity timeout | 60,000 ms |
-| Protocol violations per connection | 8 |
-| Concurrent socket connections | 128 |
-| Subscriptions per socket | 16 |
-| Subscribers per run | 128 |
-| Replay messages retained per run, including terminal | 2,048 |
-| Accounted replay bytes retained per run | 4,194,304 |
-| Projection text | 64,000 UTF-8 bytes |
-| Events returned per pull | 64 |
-| Encoded bytes returned per pull | 1,048,576 |
-| Completed runs retained | 16 |
-| Active run accounted state | 6,291,456 bytes, including terminal reserve |
-| Aggregate retained API state | 16,777,216 accounted bytes |
+| Resource                                             |                                   MVP limit |
+| ---------------------------------------------------- | ------------------------------------------: |
+| Incoming assembled WebSocket text message            |                     2,097,152 encoded bytes |
+| Individual incoming frame payload                    |                             2,097,152 bytes |
+| Outgoing WebSocket text message                      |                     3,276,800 encoded bytes |
+| API prompt                                           |                         262,144 UTF-8 bytes |
+| Request ID                                           |                   128 printable UTF-8 bytes |
+| Run ID                                               |                    64 printable ASCII bytes |
+| Origin header                                        |                                   512 bytes |
+| JSON nesting depth                                   |                                          16 |
+| JSON object keys                                     |                               32 per object |
+| JSON array elements                                  |                               128 per array |
+| Aggregate decoded JSON nodes                         |                                       4,096 |
+| HTTP/1 request line                                  |                            8,192 wire bytes |
+| HTTP header count                                    |                                          32 |
+| Aggregate HTTP/1 header name/value upper bound       |                           32,768 wire bytes |
+| Connection inbound-inactivity timeout                |                                   60,000 ms |
+| Protocol violations per connection                   |                                           8 |
+| Concurrent socket connections                        |                                         128 |
+| Subscriptions per socket                             |                                          16 |
+| Subscribers per run                                  |                                         128 |
+| Replay messages retained per run, including terminal |                                       2,048 |
+| Accounted replay bytes retained per run              |                                   4,194,304 |
+| Projection text                                      |                         524,288 UTF-8 bytes |
+| Events returned per pull                             |                                          64 |
+| Encoded bytes returned per pull                      |                                   3,276,800 |
+| Completed runs retained                              |                                          16 |
+| Active run accounted state                           | 8,388,608 bytes, including terminal reserve |
+| Aggregate retained API state                         |                  16,777,216 accounted bytes |
 
 Run Request retains its lower-component ceilings for workspace path, model, and
 identifiers. The API intentionally lowers prompt input from the Run Request's 1
 MiB ceiling so a valid escaped JSON command fits the message limit. Server Budget
-defaults remain `Synapse.Budget.default/0`, including 64,000 aggregate output
-bytes, so an explicit terminal fits the outgoing message limit after JSON escaping.
+defaults remain `Synapse.Budget.default/0`, including 524,288 aggregate output
+bytes. `SYNAPSE_MAX_OUTPUT_BYTES` may lower that API policy to a canonical integer
+in `1..524288`, and hello advertises the effective value.
 
 Encoded replay accounting includes event payload bytes and fixed per-entry
 overhead. Replay is a sliding window: old progress entries are evicted before a
 new valid entry can exceed its count or byte bound. Projection text is bounded by
-the 64,000-byte server policy even when one run requests a lower Budget, and active
-accounting reserves 1,048,576 bytes for one terminal or completed snapshot.
+the 524,288-byte API ceiling even when one run requests a lower Budget. A completed
+snapshot replaces its duplicated wire projection text with `""`, so one maximum
+content-bearing value under sixfold JSON escaping plus 131,072 envelope bytes fits
+the 3,276,800-byte message and terminal reserve.
 Aggregate accounting includes replay, projection, terminal data, identifiers, and
 fixed per-run overhead. Evict oldest completed runs before aggregate overflow.
 If appending an event would exceed established wire, projection, or sequence
@@ -533,7 +536,7 @@ terminal, and subscription wakeup output use `null` unless they are the immediat
     "max_wall_time_ms": 600000,
     "provider_inactivity_ms": 90000,
     "tool_inactivity_ms": 120000,
-    "max_output_bytes": 64000,
+    "max_output_bytes": 524288,
     "max_provider_retries": 1
   }
 }
@@ -553,7 +556,7 @@ Success returns:
   "version": 1,
   "type": "run.accepted",
   "request_id": "request-1",
-  "payload": {"run_id": "run_qwerty", "status": "starting"}
+  "payload": { "run_id": "run_qwerty", "status": "starting" }
 }
 ```
 
@@ -565,7 +568,7 @@ returns `subscription_limit` without starting a run. A second active start retur
 #### `run.cancel`
 
 ```json
-{"run_id": "run_qwerty"}
+{ "run_id": "run_qwerty" }
 ```
 
 Success returns `run.cancel_requested` with exact `run_id` and status
@@ -576,7 +579,7 @@ acknowledgement with status `already_terminal`; an unknown or evicted run return
 #### `run.subscribe`
 
 ```json
-{"run_id": "run_qwerty", "after_seq": 42}
+{ "run_id": "run_qwerty", "after_seq": 42 }
 ```
 
 `after_seq` is optional and must be a non-negative signed 64-bit integer. Omission
@@ -605,9 +608,11 @@ pong
 ```
 
 `server.hello` is the first WebSocket message. Its payload is exactly
-`{"protocol":1,"replay":"memory","max_active_runs":1}`. It exposes no
-environment, credentials, paths, models, capabilities, process identities, or
-Runtime state.
+`{"protocol":1,"replay":"memory","max_active_runs":1,"cwd":"/absolute/launch/path","max_output_bytes":524288}`.
+The bounded absolute `cwd` is captured once from the directory in which
+`mix synapse.server` starts and is the browser's editable initial Workspace path.
+It exposes no other environment, credentials, models, capabilities, process
+identities, or Runtime state.
 
 `server.error` payload is exactly:
 
@@ -641,20 +646,20 @@ internal_error
 
 Codes have fixed response policy:
 
-| Code | Message | Retryable |
-| --- | --- | --- |
-| `invalid_json` | `Message is not valid JSON` | `false` |
-| `invalid_envelope` | `Command envelope is invalid` | `false` |
-| `unsupported_version` | `Protocol version is not supported` | `false` |
-| `unknown_type` | `Command type is not supported` | `false` |
-| `invalid_request_id` | `Request ID is invalid` | `false` |
-| `invalid_payload` | `Command payload is invalid` | `false` |
-| `run_busy` | `A run is already active` | `true` |
-| `run_not_found` | `Run was not found` | `false` |
-| `invalid_cursor` | `Run cursor is invalid` | `false` |
-| `subscription_limit` | `Connection subscription limit reached` | `false` |
-| `runtime_unavailable` | `Runtime is unavailable` | `true` |
-| `internal_error` | `Internal API failure` | `false` |
+| Code                  | Message                                 | Retryable |
+| --------------------- | --------------------------------------- | --------- |
+| `invalid_json`        | `Message is not valid JSON`             | `false`   |
+| `invalid_envelope`    | `Command envelope is invalid`           | `false`   |
+| `unsupported_version` | `Protocol version is not supported`     | `false`   |
+| `unknown_type`        | `Command type is not supported`         | `false`   |
+| `invalid_request_id`  | `Request ID is invalid`                 | `false`   |
+| `invalid_payload`     | `Command payload is invalid`            | `false`   |
+| `run_busy`            | `A run is already active`               | `true`    |
+| `run_not_found`       | `Run was not found`                     | `false`   |
+| `invalid_cursor`      | `Run cursor is invalid`                 | `false`   |
+| `subscription_limit`  | `Connection subscription limit reached` | `false`   |
+| `runtime_unavailable` | `Runtime is unavailable`                | `true`    |
+| `internal_error`      | `Internal API failure`                  | `false`   |
 
 Malformed JSON and ordinary validation errors return `server.error` and leave the
 connection open. Binary messages close with RFC 6455 code 1003. Oversized
@@ -704,16 +709,16 @@ for the run and advances its cursor to `last_seq`.
 
 Projection fields are exact:
 
-| Field | Shape and meaning |
-| --- | --- |
-| `status` | `starting`, `running`, `cancel_requested`, `owner_lost`, `completed`, `failed`, or `interrupted` |
-| `model` | configured model string after `run.started`, otherwise `null` |
-| `turn` | current or most recently completed turn, initially `0` |
-| `text` | exact accumulated `text.delta` content, bounded by server output Budget and never silently truncated |
-| `active_tool` | `null` or exact object with `turn`, `operation_id`, `call_id`, `name`, and `ordinal` |
-| `provider_attempts` | sum of per-turn values from accepted `turn.completed` events |
-| `tool_calls` | sum of per-turn values from accepted `turn.completed` events |
-| `output_bytes` | sum of per-turn values from accepted `turn.completed` events, initially `0` |
+| Field               | Shape and meaning                                                                                    |
+| ------------------- | ---------------------------------------------------------------------------------------------------- |
+| `status`            | `starting`, `running`, `cancel_requested`, `owner_lost`, `completed`, `failed`, or `interrupted`     |
+| `model`             | configured model string after `run.started`, otherwise `null`                                        |
+| `turn`              | current or most recently completed turn, initially `0`                                               |
+| `text`              | accumulated `text.delta` content; exactly `""` in a completed snapshot, whose terminal Result carries final text |
+| `active_tool`       | `null` or exact object with `turn`, `operation_id`, `call_id`, `name`, and `ordinal`                 |
+| `provider_attempts` | sum of per-turn values from accepted `turn.completed` events                                         |
+| `tool_calls`        | sum of per-turn values from accepted `turn.completed` events                                         |
+| `output_bytes`      | sum of per-turn values from accepted `turn.completed` events, initially `0`                          |
 
 Tool progress does not increment aggregate counters. A `tool.started` only sets
 `active_tool`, and matching `tool.completed` only clears it. This avoids double
@@ -724,6 +729,14 @@ Failed/interrupted terminals retain the latest committed sums.
 
 Snapshot `terminal` is either `null` or exactly the payload of the previously
 exposed `run.terminal`, including its sequence. It is not a nested server envelope.
+For a successful completed snapshot, `projection.text` is an empty sentinel and
+`terminal.result.text` is the single authoritative wire copy. Active, failed, and
+interrupted snapshots retain committed projection text. A client reconstructs the
+completed projection from the Result without mutating the decoded wire object.
+
+Version 1 sends a snapshot as one complete message. Output policies above 524,288
+bytes are deferred until a successor protocol defines bounded chunk ordering,
+reassembly, cancellation, and generation/cursor validation.
 
 A retained cursor first receives an acknowledgement with mode `replay`:
 
@@ -770,24 +783,24 @@ greater than `9_223_372_036_854_775_807`, never wrapping.
 {
   "run_id": "run_qwerty",
   "seq": 12,
-  "event": {"type": "turn.started", "turn": 2, "operation_id": "provider-..."}
+  "event": { "type": "turn.started", "turn": 2, "operation_id": "provider-..." }
 }
 ```
 
 The explicit mapping is:
 
-| Run Event | Wire event and fields |
-| --- | --- |
-| `RunStarted` | `run.started`: `model` |
-| `TurnStarted` | `turn.started`: `turn`, `operation_id` |
-| `TextDelta` | `text.delta`: `turn`, `operation_id`, `item_id`, `content_index`, `delta` |
-| `ToolStarted` | `tool.started`: `turn`, `operation_id`, `call_id`, `name`, `ordinal` |
-| `ToolCompleted` | `tool.completed`: previous Tool fields plus string `status` and allowlisted `metadata` |
-| `TurnCompleted` | `turn.completed`: `turn`, string `outcome`, `provider_attempts`, `tool_calls`, `output_bytes` |
-| `RunCompleted` | retained as pending terminal, not encoded as `run.event` |
-| `RunFailed` | retained as pending terminal, not encoded as `run.event` |
-| `RunInterrupted` | retained as pending terminal, not encoded as `run.event` |
-| API RunSession DOWN without pending terminal | `run.owner_lost`: no additional fields |
+| Run Event                                    | Wire event and fields                                                                         |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `RunStarted`                                 | `run.started`: `model`                                                                        |
+| `TurnStarted`                                | `turn.started`: `turn`, `operation_id`                                                        |
+| `TextDelta`                                  | `text.delta`: `turn`, `operation_id`, `item_id`, `content_index`, `delta`                     |
+| `ToolStarted`                                | `tool.started`: `turn`, `operation_id`, `call_id`, `name`, `ordinal`                          |
+| `ToolCompleted`                              | `tool.completed`: previous Tool fields plus string `status` and allowlisted `metadata`        |
+| `TurnCompleted`                              | `turn.completed`: `turn`, string `outcome`, `provider_attempts`, `tool_calls`, `output_bytes` |
+| `RunCompleted`                               | retained as pending terminal, not encoded as `run.event`                                      |
+| `RunFailed`                                  | retained as pending terminal, not encoded as `run.event`                                      |
+| `RunInterrupted`                             | retained as pending terminal, not encoded as `run.event`                                      |
+| API RunSession DOWN without pending terminal | `run.owner_lost`: no additional fields                                                        |
 
 `tool.completed.metadata` is a new object built from at most two existing
 Agent-allowlisted keys. `tool` is copied only when it exactly equals the event's
@@ -873,13 +886,13 @@ proves Runtime is no longer active.
 
 Wire status preserves the terminal contract rather than reclassifying reasons:
 
-| Terminal source | Wire status |
-| --- | --- |
-| `RunCompleted` / Agent Result | `completed` |
-| `RunFailed` / Agent Error | `failed` |
-| `RunInterrupted` / Agent Error | `interrupted` |
-| Runtime start Error after API acceptance | `failed` |
-| Runtime `runtime_lost` without Run Event | `interrupted` |
+| Terminal source                                       | Wire status   |
+| ----------------------------------------------------- | ------------- |
+| `RunCompleted` / Agent Result                         | `completed`   |
+| `RunFailed` / Agent Error                             | `failed`      |
+| `RunInterrupted` / Agent Error                        | `interrupted` |
+| Runtime start Error after API acceptance              | `failed`      |
+| Runtime `runtime_lost` without Run Event              | `interrupted` |
 | API `internal_contract_failed` after await settlement | `interrupted` |
 
 Tool ambiguity remains `failed` because Runtime exposes it through `RunFailed`.
@@ -1056,7 +1069,7 @@ change notification is outstanding. Recording an event sends
 `{:synapse_run_changed, run_id}` only when no notification is outstanding.
 
 Socket requests a pull with its cursor. RunManager returns at most 64 messages
-and 1,048,576 encoded bytes, advances that subscriber's acknowledged cursor only
+and 3,276,800 encoded bytes, advances that subscriber's acknowledged cursor only
 for the returned batch, and reports whether more retained data exists. Socket
 pushes that batch, then schedules one local continuation when `more?` is true.
 When caught up, Manager clears the outstanding flag atomically; a concurrently
@@ -1088,7 +1101,7 @@ For a browser-supplied `Origin`, accept only a parsed origin with:
 Reject duplicate Origin headers, malformed values, wildcard hosts, suffix matches,
 opaque `null`, file origins, and non-local hosts. A missing Origin is accepted for
 native clients because the TCP peer is loopback. This is not authentication: any
-same-user native process can omit Origin and use the API.
+local native process able to reach the listener can omit Origin and use the API.
 
 WebSocket compression extensions are disabled. Transport configuration enforces
 both fragment and assembled-message bounds, HTTP/1 request-line, per-header and
@@ -1106,13 +1119,13 @@ input.
 All Router-owned HTTP responses use `Content-Type: application/json` and
 `Cache-Control: no-store`, with no trailing newline:
 
-| Result | Additional header | Exact body |
-| --- | --- | --- |
-| 200 | none | `{"status":"ok","protocol":1}` |
-| 403 | none | `{"error":"forbidden"}` |
-| 404 | none | `{"error":"not_found"}` |
-| 405 | `Allow: GET` | `{"error":"method_not_allowed"}` |
-| 426 | `Upgrade: websocket` | `{"error":"upgrade_required"}` |
+| Result | Additional header    | Exact body                       |
+| ------ | -------------------- | -------------------------------- |
+| 200    | none                 | `{"status":"ok","protocol":1}`   |
+| 403    | none                 | `{"error":"forbidden"}`          |
+| 404    | none                 | `{"error":"not_found"}`          |
+| 405    | `Allow: GET`         | `{"error":"method_not_allowed"}` |
+| 426    | `Upgrade: websocket` | `{"error":"upgrade_required"}`   |
 
 Policy precedence is Host first, then exact route, then socket query/header/Origin
 policy, then non-raising WebSocket upgrade validation. Syntactically valid Host
@@ -1238,31 +1251,31 @@ fixed port.
 ### Dependencies
 
 - [x] Confirm current compatible Bandit, Plug, WebSock, and WebSockAdapter
-  releases against Elixir `~> 1.20` and OTP 28.
+      releases against Elixir `~> 1.20` and OTP 28.
 - [x] Confirm direct Plug, Thousand Island, WebSock, and WebSockAdapter
-  dependencies rather than relying on transitive dependency exposure.
+      dependencies rather than relying on transitive dependency exposure.
 - [x] Select a maintained test-only WebSocket client and confirm it supports
-  loopback port-0 tests, custom Origin, close codes, and text/binary frames.
+      loopback port-0 tests, custom Origin, close codes, and text/binary frames.
 - [x] Add exact chosen constraints to `mix.exs`, resolve `mix.lock`, and record
-  resolved versions in this decision record.
+      resolved versions in this decision record.
 - [x] Confirm Elixir `JSON.decode/1` and `JSON.encode_to_iodata!/1` behavior for
-  string keys, duplicate object keys, malformed UTF-8, integer range, nesting,
-  and escaping expansion. Protocol v1 does not promise duplicate-key rejection
-  when the selected standard decoder collapses duplicates.
+      string keys, duplicate object keys, malformed UTF-8, integer range, nesting,
+      and escaping expansion. Protocol v1 does not promise duplicate-key rejection
+      when the selected standard decoder collapses duplicates.
 
 ### Framework Interfaces
 
 - [x] Confirm Bandit's exact loopback, assigned port-0 discovery,
-  connection-limit, fragment/message-limit, HTTP-limit, compression-disable,
-  idle-timeout, and shutdown options from current docs and source.
+      connection-limit, fragment/message-limit, HTTP-limit, compression-disable,
+      idle-timeout, and shutdown options from current docs and source.
 - [x] Confirm Plug Router upgrade, WebSockAdapter upgrade, and Bandit child-spec
-  integration.
+      integration.
 - [x] Confirm WebSock callback return shapes for initial pushes, multiple frames,
-  close frames, and process messages.
+      close frames, and process messages.
 - [x] Confirm how the selected stack reports oversized frames before allocating
-  payload copies.
+      payload copies.
 - [x] Confirm duplicate request headers remain observable for strict Origin
-  validation.
+      validation.
 
 ### Architecture
 
@@ -1271,22 +1284,22 @@ fixed port.
 - [x] Confirm no socket owns or receives a Runtime handle.
 - [x] Confirm acceptance-before-Runtime-start semantics and early cancellation.
 - [x] Confirm terminal Run Events become bounded pending projections until await
-  confirmation.
+      confirmation.
 - [x] Confirm and document deliberate transfer of the opaque Run to one trusted
-  cancellation delegate while owner-only await remains in RunSession.
+      cancellation delegate while owner-only await remains in RunSession.
 - [x] Confirm API supervisor child order and `:rest_for_one` restart sets with a
-  focused Phase 0 topology fixture; repeat against production modules in Phase 6.
+      focused Phase 0 topology fixture; repeat against production modules in Phase 6.
 
 ### Protocol And Policy
 
 - [x] Confirm every command and server message shape in this plan.
 - [x] Confirm all hard limits and Budget lowering behavior.
 - [x] Confirm run ID format: `run_` plus unpadded URL-safe Base64 from 16 random
-  bytes.
+      bytes.
 - [x] Confirm local Host and Origin policy against browser behavior used by the
-  future web client.
+      future web client.
 - [x] Confirm missing Origin remains accepted only as a documented native-client
-  tradeoff.
+      tradeoff.
 - [x] Confirm no frontend assets or remote bind switch enter Step 6.
 
 ### Learning Gate
@@ -1300,7 +1313,7 @@ fixed port.
 
 - [x] Dependency versions and exact framework interfaces are recorded.
 - [x] Protocol, ownership, supervision, limits, and local trust decisions have no
-  unresolved implementation ambiguity.
+      unresolved implementation ambiguity.
 - [x] `PLAN.md` and this plan agree.
 
 ## Phase 1: Implement Configuration And Internal Contracts
@@ -1308,20 +1321,20 @@ fixed port.
 ### Code
 
 - [x] Create `Synapse.API.Config` with validated enabled flag, fixed loopback IP,
-  port, model allowlist/default, server Budget, capability policy, trusted Runtime
-  options, and every hard limit.
+      port, model allowlist/default, server Budget, capability policy, trusted Runtime
+      options, and every hard limit.
 - [x] Read `SYNAPSE_API_PORT` and `SYNAPSE_MODEL` without logging their raw values.
 - [x] Reject non-loopback bind configuration and malformed model policy.
 - [x] Define bounded internal command structs or tagged tuples for Start, Cancel,
-  Subscribe, and Ping.
+      Subscribe, and Ping.
 - [x] Define bounded projection, subscriber, replay entry, pending-terminal, and
-  pre-confirmation run-record state. Define the exact confirmed-terminal union in
-  Phase 2 with its wire representation.
+      pre-confirmation run-record state. Define the exact confirmed-terminal union in
+      Phase 2 with its wire representation.
 - [x] Add redacted `Inspect` behavior for Phase 1 contracts. Add `format_status/1`
-  when the state-owning RunManager and RunSession processes are introduced in
-  Phases 3 and 4.
+      when the state-owning RunManager and RunSession processes are introduced in
+      Phases 3 and 4.
 - [x] Keep production defaults centralized rather than duplicated across Socket,
-  Manager, and Router.
+      Manager, and Router.
 
 ### Tests
 
@@ -1329,23 +1342,23 @@ fixed port.
 - [x] Test model default and allowlist normalization.
 - [x] Test every hard-limit range and incompatible limit combination.
 - [x] Test server Budget and capability policy cannot be widened by client-shaped
-  data.
+      data.
 - [x] Test inspection output contains no prompt, path, callback, handle, terminal
-  text, or test secret. Test process status output in Phases 3 and 4.
+      text, or test secret. Test process status output in Phases 3 and 4.
 
 ### Documentation
 
 - [x] Document trusted startup configuration separately from wire input.
 - [x] Document each hard limit and the resource it protects.
 - [x] Document why API prompt and output ceilings may be lower than core contract
-  hard ceilings.
+      hard ceilings.
 
 ### Phase Complete When
 
 - [x] Config and internal contracts compile with warnings as errors.
 - [x] Focused tests prove every configuration and inspection bound.
 - [x] No Router, socket, RunManager process, RunSession process, or Runtime start
-  code exists yet.
+      code exists yet.
 
 ## Phase 2: Implement Protocol And Wire Mapping
 
@@ -1356,16 +1369,16 @@ fixed port.
 - [x] Validate exact envelope keys before command-specific payloads.
 - [x] Validate all strings as bounded valid UTF-8 without atom conversion.
 - [x] Reject decoded structures above depth, object-key, array-element, or
-  aggregate-node limits before command construction.
+      aggregate-node limits before command construction.
 - [x] Validate Start prompt, absolute `cwd`, configured model, and Budget lowering.
 - [x] Validate Cancel, Subscribe, and Ping exact payloads.
 - [x] Return stable protocol errors without retaining offending input.
 - [x] Define the bounded confirmed-terminal internal union shared by Wire and
-  RunManager.
+      RunManager.
 - [x] Create pure `Synapse.API.Wire` constructors for every server message.
 - [x] Add one explicit clause for every concrete Run Event.
 - [x] Add separate Agent Result, Agent Error, Runtime Error, and API Error terminal
-  encoders.
+      encoders.
 - [x] Omit `final_response` and every opaque or untrusted internal value.
 - [x] Measure encoded outgoing size before returning a frame.
 
@@ -1373,22 +1386,22 @@ fixed port.
 
 - [x] Add readable exact JSON fixtures for all valid commands and server messages.
 - [x] Reject malformed JSON, unknown fields, wrong types, deep objects, overlong
-  input, and unsupported versions; fixture and document the selected decoder's
-  duplicate-key behavior.
+      input, and unsupported versions; fixture and document the selected decoder's
+      duplicate-key behavior.
 - [x] Test every Budget field omitted, lowered, equal to policy, and above policy.
 - [x] Test every Run Event and terminal mapping field by field.
 - [x] Test control characters and JSON escaping against outgoing frame bounds.
 - [x] Search encoded fixtures for test credentials, prompt/path sentinels,
-  `final_response`, PID/reference syntax, and struct names.
+      `final_response`, PID/reference syntax, and struct names.
 - [x] Prove decoding many unique external strings does not materially increase
-  atom count.
+      atom count.
 
 ### Documentation
 
 - [x] Add module docs with one start, replay, and terminal example.
 - [x] Document protocol errors versus run terminals.
 - [x] Document that wire compatibility is the explicit mapping, not Elixir struct
-  layout.
+      layout.
 
 ### Phase Complete When
 
@@ -1406,26 +1419,26 @@ fixed port.
 - [x] Roll back reservation and subscriber state if child admission fails.
 - [x] Monitor RunSession and every subscribed socket.
 - [x] Register one opaque Runtime Run without exposing it through return values or
-  inspection.
+      inspection.
 - [x] Record cancellation requested before and after handle registration.
 - [x] Record non-terminal Run Events synchronously, assign sequence, update
-  projection, and append bounded encoded replay.
+      projection, and append bounded encoded replay.
 - [x] Preserve `cancel_requested` status across every later progress event.
 - [x] Store `sink_rejected` before rejecting projection, wire, or sequence
-  overflow, and reserve the final signed 64-bit sequence for a terminal.
+      overflow, and reserve the final signed 64-bit sequence for a terminal.
 - [x] Validate terminal Run Events and retain bounded pending projections without
-  notifying clients or retaining Provider `final_response`.
+      notifying clients or retaining Provider `final_response`.
 - [x] Confirm settlement and expose exactly one terminal sequence.
 - [x] Implement snapshot, retained replay, stale reset, future rejection, and
-  completed terminal replay.
+      completed terminal replay.
 - [x] Implement bounded pull and notification acknowledgement.
 - [x] Coalesce one outstanding notification per subscriber and run.
 - [x] Enforce subscriber, per-run replay, completed-run, and aggregate byte limits.
 - [x] Evict oldest completed runs by monotonic completion ordinal.
 - [x] Remove socket and session state on DOWN without treating socket DOWN as
-  cancellation.
+      cancellation.
 - [x] On RunSession DOWN, expose a pending cleanup-gated terminal or record
-  `run.owner_lost` and retain the active reservation until terminal/restart.
+      `run.owner_lost` and retain the active reservation until terminal/restart.
 - [x] Implement redacted RunManager `format_status/1` output.
 
 ### Tests
@@ -1436,18 +1449,18 @@ fixed port.
 - [x] Test pending terminal is invisible until matching settlement.
 - [x] Test Runtime loss, mismatch, duplicate terminal, and session DOWN.
 - [x] Test projection-text overflow, sink rejection with and without terminal event
-  delivery, terminal sequence reserve, and cancellation-status precedence.
+      delivery, terminal sequence reserve, and cancellation-status precedence.
 - [x] Test cancellation before registration, after registration, repeated, and
-  post-terminal.
+      post-terminal.
 - [x] Test count and byte eviction at exact boundaries and one unit over.
 - [x] Test stale and future cursors around `first_available_seq` and `last_seq`.
 - [x] Test 128 slow subscribers create at most 128 outstanding notifications, not
-  one message per event.
+      one message per event.
 - [x] Test subscriber DOWN cleanup and completed-run eviction.
 - [x] Test owner loss never exposes a pre-cleanup terminal or admits another API
-  run; a later cleanup-gated event completes the stuck record.
+      run; a later cleanup-gated event completes the stuck record.
 - [x] Test RunManager inspection and status output contain no terminal text,
-  callback, handle, or test secret.
+      callback, handle, or test secret.
 
 ### Documentation
 
@@ -1471,11 +1484,11 @@ fixed port.
 - [x] Construct effective Budget only by lowering server policy.
 - [x] Construct and validate Run Request with server run ID and allowed model.
 - [x] Build Runtime event sink that calls only Manager `record_event` and returns
-  promptly.
+      promptly.
 - [x] Call `Runtime.start_run/3` from RunSession with trusted server options.
 - [x] Register the opaque handle and honor an already pending cancellation.
 - [x] Poll owner-only `Runtime.await/2` with bounded timeout while returning to the
-  GenServer loop between polls.
+      GenServer loop between polls.
 - [x] Report typed settlement once and stop normally.
 - [x] Monitor Manager and cancel Runtime on manager loss.
 - [x] Request idempotent cancellation from `terminate/2` when possible.
@@ -1485,14 +1498,14 @@ fixed port.
 ### Tests
 
 - [x] Instrument a Runtime-compatible test boundary and assert the same
-  RunSession PID calls start and every await.
+      RunSession PID calls start and every await.
 - [x] Test synchronous Workspace-open delay does not block Manager or sockets.
 - [x] Test cancellation during startup and immediately after registration.
 - [x] Test await timeout polling does not cancel or consume the await right.
 - [x] Test Agent Result, Agent Error, Runtime Error, Manager DOWN, session shutdown,
-  and unexpected session crash.
+      and unexpected session crash.
 - [x] Capture logs and inspection with prompt, path, callback, handle, and secret
-  sentinels.
+      sentinels.
 - [x] Test RunSession status output contains none of those sentinels.
 
 ### Documentation
@@ -1514,12 +1527,12 @@ fixed port.
 - [x] Create `Synapse.API.Socket` using the confirmed WebSock callbacks.
 - [x] Push `server.hello` first and initialize bounded connection state.
 - [x] Reject binary and oversized assembled messages with exact close codes;
-  oversized fragments remain a pre-callback Bandit 1009 path configured in Phase 6.
+      oversized fragments remain a pre-callback Bandit 1009 path configured in Phase 6.
 - [x] Decode each text message through Protocol and route only typed commands.
 - [x] Track at most 16 run cursors; process commands serially without retaining a
-  request-ID history.
+      request-ID history.
 - [x] Route run start, cancellation, and subscription only through Manager; answer
-  typed application ping locally because it has no run state.
+      typed application ping locally because it has no run state.
 - [x] Push direct responses before handling queued run-change notifications.
 - [x] Pull bounded replay/live batches and advance each local cursor exactly once.
 - [x] Schedule only one local continuation while additional pull data remains.
@@ -1532,9 +1545,9 @@ fixed port.
 - [x] Test hello is first and exact.
 - [x] Test each valid command and command-response request ID.
 - [x] Test binary, oversized, malformed, unsupported, wrong-shape, and repeated
-  invalid commands, plus request-ID reuse after a response.
+      invalid commands, plus request-ID reuse after a response.
 - [x] Test subscription cap and cursor isolation across multiple runs retained in
-  history.
+      history.
 - [x] Test accepted response appears before the first run event.
 - [x] Test bounded multi-batch delivery with a deliberately slow client.
 - [x] Kill the socket and prove Runtime continues and no cancel call occurs.
@@ -1556,32 +1569,32 @@ fixed port.
 ### Code
 
 - [x] Create Router with exact health, upgrade, 404, 405, 426, and fixed policy
-  responses.
+      responses.
 - [x] Validate Host, Origin, query, forbidden headers, and absent subprotocol before
-  upgrade.
+      upgrade.
 - [x] Configure Bandit with literal loopback IP, validated port, connection cap,
-  frame cap, idle timeout, and bounded shutdown.
+      frame cap, idle timeout, and bounded shutdown.
 - [x] Create temporary `Synapse.API.SessionSupervisor` with maximum one child.
 - [x] Create `Synapse.API.Supervisor` with Manager, SessionSupervisor, and Bandit in
-  documented `:rest_for_one` order.
+      documented `:rest_for_one` order.
 - [x] Add the API Supervisor conditionally after Runtime Supervisor in
-  `Synapse.Supervisor.child_specs/1`.
+      `Synapse.Supervisor.child_specs/1`.
 - [x] Preserve the exact existing three-child tree when API is disabled.
 - [x] Update Application and root Supervisor docs for conditional API startup and
-  reverse shutdown order.
+      reverse shutdown order.
 - [x] Create `Mix.Tasks.Synapse.Server` using `app.config`, configuration
-  validation, application start, endpoint output, and foreground lifetime.
+      validation, application start, endpoint output, and foreground lifetime.
 - [x] Accept no run or credential arguments in the Mix task.
 
 ### Tests
 
 - [x] Test disabled application starts no listener and retains existing child
-  order.
+      order.
 - [x] Test enabled child order, restart strategy, and reverse shutdown.
 - [x] Test listener failure, SessionSupervisor failure, and Manager failure
-  restart only the documented suffix.
+      restart only the documented suffix.
 - [x] Test API shutdown requests active-run cancellation while Runtime and
-  Workspace infrastructure remain alive.
+      Workspace infrastructure remain alive.
 - [x] Test health and every fixed HTTP failure through real loopback HTTP.
 - [x] Test all Host and Origin cases without logging rejected values.
 - [x] Test port 0 isolation and configured fixed-port conflict failure.
@@ -1591,7 +1604,7 @@ fixed port.
 
 - [x] Document explicit versus ordinary application startup.
 - [x] Document every supervised child, restart type, shutdown order, and failure
-  consequence.
+      consequence.
 - [x] Document local endpoint and environment variables.
 
 ### Phase Complete When
@@ -1606,11 +1619,11 @@ fixed port.
 
 - [x] Create a temporary project fixture containing a small `README.md`.
 - [x] Script Fake Provider turns for read, write, bash verification, and final
-  text.
+      text.
 - [x] Use Fake Workspace for pure API acceptance and a separate temporary Real
-  Workspace case for process cleanup.
+      Workspace case for process cleanup.
 - [x] Start an isolated API tree on loopback port 0 with trusted test Runtime
-  options.
+      options.
 
 ### Scenarios
 
@@ -1620,11 +1633,11 @@ fixed port.
 - [x] Disconnect after at least one event and prove the run remains active.
 - [x] Reconnect with retained cursor and receive gap-free replay plus live events.
 - [x] Reconnect with an intentionally stale cursor and replace state from reset
-  snapshot.
+      snapshot.
 - [x] Receive one successful terminal without Provider final response.
 - [x] Independently verify the temporary fixture and all Runtime children settled.
 - [x] Run a second scenario that cancels through another socket and receives one
-  interrupted terminal.
+      interrupted terminal.
 - [x] Run startup failure and Runtime-loss scenarios with sanitized terminals.
 
 ### Verification
@@ -1638,7 +1651,7 @@ fixed port.
 
 - [x] The full protocol-to-core path passes without Tokamak or user files.
 - [x] Disconnect/reconnect and cancellation semantics are proven over real
-  WebSockets.
+      WebSockets.
 - [x] No temporary API, Runtime, Workspace, command, or test-client process leaks.
 
 ## Phase 8: Reliability And Security Hardening
@@ -1646,47 +1659,47 @@ fixed port.
 ### Adversarial Input
 
 - [x] Fuzz bounded JSON values and malformed envelopes without crashes or atom
-  growth.
+      growth.
 - [x] Exercise maximum escaped prompt, model, IDs, metadata, deltas, terminal text,
-  and frame sizes.
+      and frame sizes.
 - [x] Send fragmented messages, rapid commands, reused request IDs, binary
-  messages, and protocol-violation floods within test bounds.
+      messages, and protocol-violation floods within test bounds.
 - [x] Attempt capability, Provider, callback, Runtime option, credential, handle,
-  and struct-shaped payload injection.
+      and struct-shaped payload injection.
 - [x] Attempt Host confusion, DNS-rebinding-style Host values, local-host suffixes,
-  duplicate Origin, `null`, file, non-local, malformed, and oversized Origins.
+      duplicate Origin, `null`, file, non-local, malformed, and oversized Origins.
 
 ### Failure Injection
 
 - [x] Kill Socket, Bandit, SessionSupervisor, RunSession, RunManager, Runtime
-  RunServer, and application in each meaningful phase.
+      RunServer, and application in each meaningful phase.
 - [x] Force event encoder failure, replay accounting limit, sequence exhaustion,
-  subscriber DOWN, and terminal mismatch.
+      subscriber DOWN, and terminal mismatch.
 - [x] Prove no restart path replays Provider or Tool work.
 - [x] Prove Manager loss clearly loses ephemeral lookup/replay and cancels the
-  active owner layer.
+      active owner layer.
 - [x] Prove application shutdown leaves no owned direct operation in temporary
-  Real Workspace tests.
+      Real Workspace tests.
 
 ### Disclosure Review
 
 - [x] Use distinct sentinel values for credential, prompt, path, model output,
-  Tool data, Provider response, callbacks, and opaque handles.
+      Tool data, Provider response, callbacks, and opaque handles.
 - [x] Search every frame, HTTP response, log capture, exception, inspect output,
-  and status report for forbidden sentinels.
+      and status report for forbidden sentinels.
 - [x] Confirm content-bearing `text.delta`, projection text, and final result text
-  are the only intentional model-content wire surfaces.
+      are the only intentional model-content wire surfaces.
 - [x] Confirm logs never contain those intentional content-bearing surfaces.
 - [x] Confirm subprocess environment still strips `TOKAMAK_API_KEY` through the
-  existing Workspace contract.
+      existing Workspace contract.
 
 ### Resource Review
 
 - [x] Measure Manager memory before and after event-count, replay-byte,
-  completed-run, and aggregate eviction tests.
+      completed-run, and aggregate eviction tests.
 - [x] Measure socket mailbox length under slow-client tests.
 - [x] Confirm connection, subscription, request, event, and retained-run caps are
-  enforced at exact boundaries.
+      enforced at exact boundaries.
 - [x] Confirm all tests use bounded receives and no fixed scheduler sleeps.
 
 ### Phase Complete When
@@ -1705,9 +1718,9 @@ temporary workspace.
 
 - [x] Start `mix synapse.server` with production Provider and Workspace policy.
 - [x] Connect through the same external protocol client used for deterministic
-  acceptance.
+      acceptance.
 - [x] Start a text-only prompt and receive streamed text plus one completed
-  terminal.
+      terminal.
 
 ### Live Coding Run
 
@@ -1715,17 +1728,17 @@ temporary workspace.
 - [x] Ask the model to read it, create `hello.txt`, and run exact verification.
 - [x] Observe at least one Tool event and increasing API sequences.
 - [x] Disconnect and reconnect during the run when timing permits; otherwise run a
-  separate deterministic delayed-provider reconnect proof.
+      separate deterministic delayed-provider reconnect proof.
 - [x] Receive one terminal and independently verify file content and command
-  result.
+      result.
 - [x] Confirm no owned Runtime or Workspace child remains.
 
 ### Security
 
 - [x] Capture API logs and frames and confirm no API key, authorization header,
-  Provider response, Runtime Run, Workspace Handle, or callback appears.
+      Provider response, Runtime Run, Workspace Handle, or callback appears.
 - [x] Confirm the client never sends the API key, Provider selection, capabilities,
-  or Runtime options.
+      or Runtime options.
 - [x] Remove the temporary fixture after inspection.
 
 ### Phase Complete When
@@ -1738,45 +1751,36 @@ temporary workspace.
 
 ### Public Documentation
 
-- [x] Add `@moduledoc`, `@typedoc`, and complete `@spec` declarations to public API
-  modules and contracts.
+<!-- prettier-ignore -->
+- [x] Add `@moduledoc`, `@typedoc`, and complete `@spec` declarations to public API modules and contracts.
 - [x] Keep internal state modules private unless a public contract requires them.
-- [x] Document protocol versioning, endpoint, commands, messages, limits, replay,
-  close codes, and error codes.
-- [x] Document Runtime owner/awaiter, cancellation holder, event sink, and terminal
-  confirmation process ownership.
+- [x] Document protocol versioning, endpoint, commands, messages, limits, replay, close codes, and error codes.
+- [x] Document Runtime owner/awaiter, cancellation holder, event sink, and terminal confirmation process ownership.
 - [x] Document supervision, conditional startup, restart, and shutdown behavior.
-- [x] Document loopback, Origin, missing-Origin, same-user process, and process-exec
-  security limitations.
+- [x] Document loopback, Origin, missing-Origin, local-process access, and server-user process-exec limitations.
 - [x] Document process-lifetime replay and every condition that loses it.
 - [x] Add `PLAN-API.md` to ExDoc extras and the Plans group.
 - [x] Add API modules to a dedicated ExDoc module group when they exist.
-- [x] Add `docs/learning/API.md` with verified Phase 0 dependency, framework,
-  ownership, and trust evidence.
-- [x] Expand `docs/learning/API.md` with implementation experience from later
-  phases.
+- [x] Add `docs/learning/API.md` with verified Phase 0 dependency, framework, ownership, and trust evidence.
+- [x] Expand `docs/learning/API.md` with implementation experience from later phases.
 
 ### Consistency Review
 
-- [x] Remove stale planned CLI, renderer, exit-code, and Ctrl-C ownership wording
-  from active architecture docs while preserving historical CLI-subprocess
-  comparisons where they remain relevant.
-- [x] Ensure lower completed component plans describe the API as a higher adapter,
-  not a dependency.
-- [x] Ensure README future architecture does not contradict MVP one-run,
-  process-lifetime replay, or local trust claims.
+<!-- prettier-ignore -->
+- [x] Remove stale planned CLI, renderer, exit-code, and Ctrl-C ownership wording from active architecture docs while preserving historical CLI-subprocess comparisons where they remain relevant.
+- [x] Ensure lower completed component plans describe the API as a higher adapter, not a dependency.
+- [x] Ensure README future architecture does not contradict MVP one-run, process-lifetime replay, or local trust claims.
 - [x] Verify every relative documentation link and ExDoc extra path.
 
 ### Comprehension Gate
 
+<!-- prettier-ignore -->
 - [x] Explain why RunSession, Manager, and Socket are three separate processes.
-- [x] Trace `run.start` from JSON to validated Run Request without exposing trusted
-  options.
+- [x] Trace `run.start` from JSON to validated Run Request without exposing trusted options.
 - [x] Trace one Runtime event to sequence, projection, replay, and socket delivery.
 - [x] Trace cancellation before and after Runtime handle registration.
 - [x] Explain stale reset versus retained replay and why neither is durable.
-- [x] Explain Manager, Session, listener, Runtime, and application failure
-  consequences.
+- [x] Explain Manager, Session, listener, Runtime, and application failure consequences.
 - [x] Explain exactly which content may cross the wire and which authority may not.
 - [x] Explain how all behavior is tested without Tokamak.
 
@@ -1788,12 +1792,12 @@ temporary workspace.
 - [x] `mix docs`
 - [x] Review generated ExDoc navigation and every API example.
 - [x] Review final diff for accidental frontend, persistence, or remote-server
-  scope.
+      scope.
 
 ### Phase Complete When
 
 - [x] API behavior can be implemented and maintained from source, LSP, ExDoc, and
-  this plan without the original AI conversation.
+      this plan without the original AI conversation.
 - [x] All deterministic verification passes and live tests remain explicit opt-in.
 - [x] Every checklist phase and the definition of done are satisfied.
 
@@ -1802,25 +1806,25 @@ temporary workspace.
 - [x] Phases 0 through 10 are complete.
 - [x] `mix synapse.server` binds only `127.0.0.1` and serves no frontend assets.
 - [x] Protocol v1 has exact bounded command, event, snapshot, terminal, and error
-  shapes.
+      shapes.
 - [x] RunSession alone starts and awaits Runtime.
 - [x] RunManager alone owns API run lookup, projections, replay, subscriptions, and
-  non-owner cancellation.
+      non-owner cancellation.
 - [x] Socket disconnect never cancels a run.
 - [x] Reconnect produces complete retained replay or explicit reset, never a
-  silent sequence gap.
+      silent sequence gap.
 - [x] Every connection, subscriber, event, replay, projection, terminal, and
-  completed-run collection has a tested hard bound.
+      completed-run collection has a tested hard bound.
 - [x] Slow clients cannot create unbounded socket or Manager mailboxes.
 - [x] Ordinary terminals are exposed only after Runtime cleanup and await
-  semantics are reconciled. `runtime_lost` is the sole explicit
-  settlement-unproven terminal; RunSession loss without that typed await result
-  remains `owner_lost` rather than a false terminal.
+      semantics are reconciled. `runtime_lost` is the sole explicit
+      settlement-unproven terminal; RunSession loss without that typed await result
+      remains `owner_lost` rather than a false terminal.
 - [x] No message, response, log, exception, inspect output, or status report contains
-  credentials or opaque host authority.
+      credentials or opaque host authority.
 - [x] Deterministic end-to-end acceptance needs no Tokamak key or user checkout.
 - [x] Opt-in live acceptance completes one real coding run through an external
-  protocol client.
+      protocol client.
 - [x] Compile, format, test, and docs verification pass.
 
 ## Deferred API Work
@@ -1841,6 +1845,7 @@ Do not add these to the MVP API:
 - Compression, binary protocol, protocol negotiation, or generic RPC.
 - Telemetry export, billing, analytics, or content-bearing logs.
 
-Future work should extend protocol v1 deliberately or introduce a new version. It
-must not reinterpret existing messages silently or turn ephemeral sequence values
-into a false durability guarantee.
+Because protocol-v1 objects and enums are closed, any wire-shape or semantic change
+requires a new version unless compatibility is proved for every existing client.
+Future work must not reinterpret existing messages silently or turn ephemeral
+sequence values into a false durability guarantee.

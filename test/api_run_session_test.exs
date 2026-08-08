@@ -18,7 +18,15 @@ defmodule Synapse.API.RunSessionTest do
   test "the admitted RunSession PID starts Runtime and performs every await poll" do
     {:ok, server_budget} = Budget.new(max_turns: 10)
     {:ok, command_budget} = Budget.new(max_turns: 5)
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a", budget: server_budget)
+
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-session-launch",
+        default_model: "model-a",
+        budget: server_budget
+      )
+
     harness = start_harness(config)
     command = start_command(config, budget: command_budget)
 
@@ -135,7 +143,12 @@ defmodule Synapse.API.RunSessionTest do
       )
 
     {:ok, config} =
-      Config.new(enabled: true, default_model: "model-a", runtime_options: options)
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-session-launch",
+        default_model: "model-a",
+        runtime_options: options
+      )
 
     harness = start_harness(config, runtime: RuntimeBoundary.default(), id: 42)
     assert {:ok, run_id} = RunManager.start_run(harness.manager, start_command(config))
@@ -348,7 +361,12 @@ defmodule Synapse.API.RunSessionTest do
       )
 
     {:ok, config} =
-      Config.new(enabled: true, default_model: "model-a", runtime_options: runtime_options)
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-session-launch",
+        default_model: "model-a",
+        runtime_options: runtime_options
+      )
 
     harness = start_harness(config)
     command = start_command(config, prompt: secret, cwd: path)
@@ -525,7 +543,13 @@ defmodule Synapse.API.RunSessionTest do
   end
 
   defp default_config do
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a")
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-run-session-launch",
+        default_model: "model-a"
+      )
+
     config
   end
 

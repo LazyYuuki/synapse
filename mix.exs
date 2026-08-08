@@ -53,6 +53,7 @@ defmodule Synapse.MixProject do
         "docs/plan/PLAN-AGENT-LOOP.md",
         "docs/plan/PLAN-RUNTIME.md",
         "docs/plan/PLAN-API.md",
+        "docs/plan/PLAN-UI.md",
         "docs/learning/MIX.md",
         "docs/learning/PROVIDER.md",
         "docs/learning/WORKSPACE.md",
@@ -60,6 +61,7 @@ defmodule Synapse.MixProject do
         "docs/learning/AGENT-LOOP.md",
         "docs/learning/RUNTIME.md",
         "docs/learning/API.md",
+        "docs/learning/UI.md",
         "docs/CLAUDE-HARNESS.md"
       ],
       groups_for_extras: [
@@ -71,7 +73,8 @@ defmodule Synapse.MixProject do
           "docs/plan/PLAN-TOOL-SYSTEM.md",
           "docs/plan/PLAN-AGENT-LOOP.md",
           "docs/plan/PLAN-RUNTIME.md",
-          "docs/plan/PLAN-API.md"
+          "docs/plan/PLAN-API.md",
+          "docs/plan/PLAN-UI.md"
         ],
         Learning: [
           "docs/learning/MIX.md",
@@ -80,7 +83,8 @@ defmodule Synapse.MixProject do
           "docs/learning/TOOL-SYSTEM.md",
           "docs/learning/AGENT-LOOP.md",
           "docs/learning/RUNTIME.md",
-          "docs/learning/API.md"
+          "docs/learning/API.md",
+          "docs/learning/UI.md"
         ],
         Research: ["docs/CLAUDE-HARNESS.md"]
       ],

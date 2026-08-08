@@ -207,7 +207,9 @@ defmodule Synapse.API.RouterTest do
                "payload" => %{
                  "protocol" => 1,
                  "replay" => "memory",
-                 "max_active_runs" => 1
+                 "max_active_runs" => 1,
+                 "cwd" => "/synthetic/api-router-launch",
+                 "max_output_bytes" => 524_288
                }
              }
 
@@ -458,7 +460,17 @@ defmodule Synapse.API.RouterTest do
   end
 
   defp config(options \\ []) do
-    attrs = Keyword.merge([enabled: true, default_model: "model-a", port: 0], options)
+    attrs =
+      Keyword.merge(
+        [
+          enabled: true,
+          launch_cwd: "/synthetic/api-router-launch",
+          default_model: "model-a",
+          port: 0
+        ],
+        options
+      )
+
     {:ok, config} = Config.new(attrs)
     config
   end

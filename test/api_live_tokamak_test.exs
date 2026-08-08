@@ -225,7 +225,15 @@ defmodule Synapse.API.LiveTokamakTest do
 
   defp start_api do
     model = System.fetch_env!("SYNAPSE_MODEL")
-    {:ok, config} = Config.new(enabled: true, default_model: model, port: 0)
+
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: File.cwd!(),
+        default_model: model,
+        port: 0
+      )
+
     reference = make_ref()
     manager_name = {:global, {:api_live_manager, reference}}
     sessions_name = {:global, {:api_live_sessions, reference}}
@@ -451,7 +459,13 @@ defmodule Synapse.API.LiveTokamakTest do
              "version" => 1,
              "type" => "server.hello",
              "request_id" => nil,
-             "payload" => %{"protocol" => 1, "replay" => "memory", "max_active_runs" => 1}
+             "payload" => %{
+               "protocol" => 1,
+               "replay" => "memory",
+               "max_active_runs" => 1,
+               "cwd" => File.cwd!(),
+               "max_output_bytes" => 524_288
+             }
            }
   end
 

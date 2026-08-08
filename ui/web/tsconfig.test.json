@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.node.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node", "@playwright/test"]
+  },
+  "include": [
+    "tests/e2e/**/*.ts",
+    "tests/fixtures/**/*.ts",
+    "tests/live/**/*.ts",
+    "playwright.live.config.ts"
+  ]
+}

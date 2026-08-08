@@ -88,6 +88,7 @@ defmodule Synapse.API.ApplicationShutdownFixture do
       {:ok, config} =
         Config.new(
           enabled: true,
+          launch_cwd: File.cwd!(),
           default_model: "model-a",
           port: 0,
           runtime_options: runtime_options

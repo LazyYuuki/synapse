@@ -141,6 +141,7 @@ defmodule Synapse.API.Phase10Test do
 
     assert count_occurrences(mix_source, "docs/plan/PLAN-API.md") == 2
     assert count_occurrences(mix_source, "docs/learning/API.md") == 2
+    assert count_occurrences(mix_source, "docs/learning/UI.md") == 2
     assert mix_source =~ ~s("Local WebSocket API")
     assert mix_source =~ "Mix.Tasks.Synapse.Server"
   end
@@ -161,7 +162,10 @@ defmodule Synapse.API.Phase10Test do
 
   test "all relative Markdown documentation links resolve" do
     markdown_paths =
-      [project_path("README.md") | Path.wildcard(project_path("docs/**/*.md"))]
+      [
+        project_path("README.md"),
+        project_path("ui/web/README.md") | Path.wildcard(project_path("docs/**/*.md"))
+      ]
 
     Enum.each(markdown_paths, fn source_path ->
       source = File.read!(source_path)

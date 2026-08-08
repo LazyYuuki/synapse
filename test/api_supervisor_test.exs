@@ -140,7 +140,14 @@ defmodule Synapse.API.SupervisorTest do
     on_exit(fn -> :gen_tcp.close(reserved) end)
     {:ok, {{127, 0, 0, 1}, port}} = :inet.sockname(reserved)
     names = names()
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a", port: port)
+
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-supervisor-launch",
+        default_model: "model-a",
+        port: port
+      )
 
     Process.flag(:trap_exit, true)
 
@@ -388,7 +395,14 @@ defmodule Synapse.API.SupervisorTest do
   end
 
   defp config do
-    {:ok, config} = Config.new(enabled: true, default_model: "model-a", port: 0)
+    {:ok, config} =
+      Config.new(
+        enabled: true,
+        launch_cwd: "/synthetic/api-supervisor-launch",
+        default_model: "model-a",
+        port: 0
+      )
+
     config
   end
 

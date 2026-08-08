@@ -19,8 +19,8 @@ defmodule Synapse.API.Router do
 
   Missing Origin is deliberately accepted for native clients. Loopback and Origin
   checks reduce accidental browser/LAN exposure but are not authentication: any
-  same-user process can connect and request server-policy authority. In particular,
-  `process.exec` runs with same-user host authority and is not sandboxed. Protocol
+  local process able to reach the listener can request server-policy authority. In
+  particular, `process.exec` runs as the server's OS user and is not sandboxed. Protocol
   clients cannot submit credentials, capabilities, Provider modules, callbacks,
   Workspace handles, or Runtime options. See the [local API guide](api.html).
   """

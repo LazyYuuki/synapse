@@ -609,7 +609,13 @@ defmodule Synapse.API.AcceptanceTest do
     sessions_name = {:global, {:api_acceptance_sessions, reference}}
 
     attrs =
-      [enabled: true, default_model: @model, port: 0, runtime_options: runtime_options] ++
+      [
+        enabled: true,
+        launch_cwd: "/synthetic/api-acceptance-launch",
+        default_model: @model,
+        port: 0,
+        runtime_options: runtime_options
+      ] ++
         config_options
 
     {:ok, config} = Config.new(attrs)
@@ -946,7 +952,9 @@ defmodule Synapse.API.AcceptanceTest do
              "payload" => %{
                "protocol" => 1,
                "replay" => "memory",
-               "max_active_runs" => 1
+               "max_active_runs" => 1,
+               "cwd" => "/synthetic/api-acceptance-launch",
+               "max_output_bytes" => 524_288
              }
            }
   end

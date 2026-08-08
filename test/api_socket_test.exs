@@ -75,15 +75,20 @@ defmodule Synapse.API.SocketTest do
              "payload" => %{
                "protocol" => 1,
                "replay" => "memory",
-               "max_active_runs" => 1
+               "max_active_runs" => 1,
+               "cwd" => "/synthetic/api-socket-launch",
+               "max_output_bytes" => 524_288
              }
            }
 
     assert %Policy{} = state.policy
+    assert state.policy.launch_cwd == "/synthetic/api-socket-launch"
     refute Map.has_key?(Map.from_struct(state.policy), :capabilities)
     refute Map.has_key?(Map.from_struct(state.policy), :runtime_options)
     refute inspect(arguments) =~ secret
     refute inspect(state) =~ secret
+    refute inspect(arguments) =~ config.launch_cwd
+    refute inspect(state) =~ config.launch_cwd
     refute inspect(state) =~ inspect(harness.manager)
     assert state.cursors == %{}
     assert state.pending_pulls == []
@@ -97,6 +102,20 @@ defmodule Synapse.API.SocketTest do
 
     assert {:stop, :normal, 1011, _state} =
              Socket.init(%Arguments{manager: harness.manager, policy: forged})
+
+    forged = %{state.policy | launch_cwd: "relative"}
+
+    assert {:stop, :normal, 1011, _state} =
+             Socket.init(%Arguments{manager: harness.manager, policy: forged})
+
+    for forged <- [
+          %{state.policy | default_model: nil},
+          %{state.policy | max_run_id_bytes: 25},
+          %{state.policy | max_json_object_keys: 6}
+        ] do
+      assert {:stop, :normal, 1011, _state} =
+               Socket.init(%Arguments{manager: harness.manager, policy: forged})
+    end
   end
 
   test "ping supports request-ID reuse and control callbacks do not duplicate pong" do
@@ -997,7 +1016,7 @@ defmodule Synapse.API.SocketTest do
              )
 
     send(session, {:settle, {:ok, result}, self()})
-    assert_receive {:settled, :ok}
+    assert_receive {:settled, :ok}, 1_000
     run_id
   end
 
@@ -1008,7 +1027,16 @@ defmodule Synapse.API.SocketTest do
   end
 
   defp config(overrides \\ []) do
-    attrs = Keyword.merge([enabled: true, default_model: "model-a"], overrides)
+    attrs =
+      Keyword.merge(
+        [
+          enabled: true,
+          launch_cwd: "/synthetic/api-socket-launch",
+          default_model: "model-a"
+        ],
+        overrides
+      )
+
     {:ok, config} = Config.new(attrs)
     config
   end

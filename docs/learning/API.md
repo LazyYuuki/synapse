@@ -85,10 +85,10 @@ the listener under `:rest_for_one`.
 
 Loopback binding prevents accidental LAN exposure, and strict local Origin checks
 prevent an ordinary remote web page from opening the socket through a browser.
-Neither is authentication or sandboxing. Any process running as the local user can
-connect directly, omit Origin, and request all authority permitted by trusted server
-policy. The MVP therefore remains a single-user local adapter and offers no remote
-bind switch, credentials, TLS, or multi-user isolation.
+Neither is OS-user authentication or sandboxing. Any local process able to reach
+the listener can connect directly, omit Origin, and request all authority permitted
+by trusted server policy. The MVP therefore requires a trusted local host and offers
+no remote bind switch, credentials, TLS, or multi-user isolation.
 
 Production policy permits read, write, and `process.exec`. The last runs commands
 as the same OS user with ambient host authority; neither the API, a BEAM process,
@@ -112,53 +112,62 @@ Trusted configuration or `SYNAPSE_API_PORT` may change the port. Every WebSocket
 application message is UTF-8 text JSON with this exact envelope:
 
 ```json
-{"version":1,"type":"ping","request_id":"request-1","payload":{}}
+{ "version": 1, "type": "ping", "request_id": "request-1", "payload": {} }
 ```
 
 Version 1 requires exactly the four envelope keys. Unknown fields, non-integer
-versions, unknown message types, and malformed payloads are rejected; future work
-must extend v1 deliberately or introduce a new version rather than reinterpret an
-existing shape. Object-key order is irrelevant, and duplicate-key ordering is not
-a compatibility promise.
+versions, unknown message types, and malformed payloads are rejected. Because all
+objects and enums are closed, the conservative rule is that any wire-shape or
+semantic change requires a new version and endpoint unless compatibility is proved
+for every existing client. Existing v1 shapes must never be reinterpreted. Object
+key order is irrelevant, and duplicate-key ordering is not a compatibility promise.
+
+Before the first standalone UI release, v1 was deliberately updated in place so
+`server.hello` also carries the task launch directory as `cwd` and the trusted
+aggregate output policy as `max_output_bytes`. Completed snapshots use an empty
+projection-text sentinel and carry successful final text only in the nested
+terminal Result. Server and browser must therefore be upgraded together; an older
+exact-shape client will reject the new hello or snapshot. Future changes remain
+subject to the conservative versioning rule above.
 
 Client commands are:
 
-| Type | Payload | Purpose |
-| --- | --- | --- |
-| `run.start` | required `prompt`, absolute `cwd`; optional allowlisted `model`, lowering-only `budget` | reserve and start the one active run |
-| `run.cancel` | server-issued `run_id` | record idempotent cancellation intent |
-| `run.subscribe` | `run_id`; optional non-negative signed-64-bit `after_seq` | obtain snapshot, reset, or retained replay |
-| `ping` | exact empty object | keep an idle connection active and receive `pong` |
+| Type            | Payload                                                                                 | Purpose                                           |
+| --------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `run.start`     | required `prompt`, absolute `cwd`; optional allowlisted `model`, lowering-only `budget` | reserve and start the one active run              |
+| `run.cancel`    | server-issued `run_id`                                                                  | record idempotent cancellation intent             |
+| `run.subscribe` | `run_id`; optional non-negative signed-64-bit `after_seq`                               | obtain snapshot, reset, or retained replay        |
+| `ping`          | exact empty object                                                                      | keep an idle connection active and receive `pong` |
 
 Server messages are:
 
-| Type | Correlation | Purpose |
-| --- | --- | --- |
-| `server.hello` | `request_id: null` | announce protocol 1, memory replay, and one active run |
-| `server.error` | command ID when safely known | report a pre-admission command/protocol failure |
-| `run.accepted` | start request ID | return the server-issued run ID before progress |
-| `run.cancel_requested` | cancel request ID | acknowledge intent or an already-terminal run |
-| `run.snapshot` | subscribe ID, or `null` for asynchronous reset | return authoritative projection or replay acknowledgement |
-| `run.event` | `request_id: null` | deliver one sequenced non-terminal event |
-| `run.terminal` | `request_id: null` | deliver one sequenced confirmed terminal |
-| `pong` | ping request ID | answer the application keepalive |
+| Type                   | Correlation                                    | Purpose                                                   |
+| ---------------------- | ---------------------------------------------- | --------------------------------------------------------- |
+| `server.hello`         | `request_id: null`                             | announce protocol 1, memory replay, one active run, launch `cwd`, and aggregate output policy |
+| `server.error`         | command ID when safely known                   | report a pre-admission command/protocol failure           |
+| `run.accepted`         | start request ID                               | return the server-issued run ID before progress           |
+| `run.cancel_requested` | cancel request ID                              | acknowledge intent or an already-terminal run             |
+| `run.snapshot`         | subscribe ID, or `null` for asynchronous reset | return authoritative projection or replay acknowledgement |
+| `run.event`            | `request_id: null`                             | deliver one sequenced non-terminal event                  |
+| `run.terminal`         | `request_id: null`                             | deliver one sequenced confirmed terminal                  |
+| `pong`                 | ping request ID                                | answer the application keepalive                          |
 
 Stable `server.error` codes are:
 
-| Code | Retryable | Meaning |
-| --- | --- | --- |
-| `invalid_json` | no | message is not valid JSON |
-| `invalid_envelope` | no | envelope or decoded tree is invalid |
-| `unsupported_version` | no | version is not 1 |
-| `unknown_type` | no | command type is unsupported |
-| `invalid_request_id` | no | request ID is invalid or too large |
-| `invalid_payload` | no | command payload violates its closed contract |
-| `run_busy` | yes | one active run is already reserved |
-| `run_not_found` | no | run lookup is absent or was evicted |
-| `invalid_cursor` | no | cursor is ahead, malformed, or not owned by this subscriber |
-| `subscription_limit` | no | per-socket or per-run subscription capacity is full |
-| `runtime_unavailable` | yes | admission could not start a RunSession |
-| `internal_error` | no | sanitized internal API failure |
+| Code                  | Retryable | Meaning                                                     |
+| --------------------- | --------- | ----------------------------------------------------------- |
+| `invalid_json`        | no        | message is not valid JSON                                   |
+| `invalid_envelope`    | no        | envelope or decoded tree is invalid                         |
+| `unsupported_version` | no        | version is not 1                                            |
+| `unknown_type`        | no        | command type is unsupported                                 |
+| `invalid_request_id`  | no        | request ID is invalid or too large                          |
+| `invalid_payload`     | no        | command payload violates its closed contract                |
+| `run_busy`            | yes       | one active run is already reserved                          |
+| `run_not_found`       | no        | run lookup is absent or was evicted                         |
+| `invalid_cursor`      | no        | cursor is ahead, malformed, or not owned by this subscriber |
+| `subscription_limit`  | no        | per-socket or per-run subscription capacity is full         |
+| `runtime_unavailable` | yes       | admission could not start a RunSession                      |
+| `internal_error`      | no        | sanitized internal API failure                              |
 
 The internal decoder may also classify invalid trusted policy as `internal_error`;
 Socket treats that as close 1011 instead of sending a client validation response.
@@ -166,14 +175,14 @@ The complete resource ceilings are listed under [Phase 1 Configuration](#phase-1
 
 Close behavior is:
 
-| Condition | Code owner/result |
-| --- | --- |
-| complete binary application message | Socket 1003 |
-| ninth ordinary protocol violation | Socket 1008 |
-| oversized text message, frame, or fragmented message | Socket/Bandit 1009 |
-| invalid UTF-8 text | Bandit 1007 |
-| malformed WebSocket framing | transport-owned RFC 6455 close |
-| unsafe callback, Manager, cursor, or trusted-policy state | Socket 1011 |
+| Condition                                                 | Code owner/result              |
+| --------------------------------------------------------- | ------------------------------ |
+| complete binary application message                       | Socket 1003                    |
+| ninth ordinary protocol violation                         | Socket 1008                    |
+| oversized text message, frame, or fragmented message      | Socket/Bandit 1009             |
+| invalid UTF-8 text                                        | Bandit 1007                    |
+| malformed WebSocket framing                               | transport-owned RFC 6455 close |
+| unsafe callback, Manager, cursor, or trusted-policy state | Socket 1011                    |
 
 ## Process And Authority Map
 
@@ -230,6 +239,13 @@ read, write, or process execution is permitted. A failure before reservation ret
 `server.error`. After `run.accepted`, startup and lifecycle failures produce exactly
 one sequenced `run.terminal`, never a second command error.
 
+`mix synapse.server` captures its process working directory once before application
+startup and overwrites any stale configured launch path. The first `server.hello`
+advertises that bounded absolute path so browser clients can use it as the default
+explicit `run.start.cwd`. A client may still send another absolute path. This is a
+starting-directory convenience, not containment: Bash remains same-user and may
+traverse outside the selected Workspace.
+
 ## Event And Terminal Trace
 
 For an ordinary Runtime `TextDelta`:
@@ -281,18 +297,18 @@ views of Manager memory, never durable recovery.
 
 ## Replay And Failure Consequences
 
-| Event or failure | State and restart consequence |
-| --- | --- |
-| old replay prefix exceeds count/bytes | oldest frames are lost; projection remains and stale cursors reset |
-| completed-run count/aggregate eviction | the complete run lookup, snapshot, terminal, and replay are lost |
-| Socket exits | its subscriptions disappear; run, session, Runtime work, and replay survive; no cancellation |
-| Bandit/listener exits | connections die and only Bandit restarts; Manager, SessionSupervisor, RunSession, and replay survive |
-| RunSession exits | temporary child is not restarted; Manager cancels a registered handle and exposes pending cleanup terminal or `run.owner_lost`; without a later terminal the active reservation can remain until Manager/application restart |
-| SessionSupervisor exits | active RunSession is lost as above; Manager survives; SessionSupervisor and Bandit restart; no replacement run starts |
-| RunManager exits | every run ID, projection, sequence, replay entry, terminal, and subscription is lost; Manager, SessionSupervisor, and Bandit restart; old sessions are cancelled, never replayed |
-| Runtime RunServer exits | owner-only await returns `runtime_lost`; API exposes one interrupted settlement-unproven terminal; Runtime work is not replayed |
-| normal application shutdown | Bandit stops first, sessions request cancellation while Manager and lower cleanup infrastructure remain; terminal delivery is not guaranteed |
-| application/VM loss or fresh start | all API memory and sequence identity are lost; no in-tree recovery or durable replay exists |
+| Event or failure                       | State and restart consequence                                                                                                                                                                                                |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| old replay prefix exceeds count/bytes  | oldest frames are lost; projection remains and stale cursors reset                                                                                                                                                           |
+| completed-run count/aggregate eviction | the complete run lookup, snapshot, terminal, and replay are lost                                                                                                                                                             |
+| Socket exits                           | its subscriptions disappear; run, session, Runtime work, and replay survive; no cancellation                                                                                                                                 |
+| Bandit/listener exits                  | connections die and only Bandit restarts; Manager, SessionSupervisor, RunSession, and replay survive                                                                                                                         |
+| RunSession exits                       | temporary child is not restarted; Manager cancels a registered handle and exposes pending cleanup terminal or `run.owner_lost`; without a later terminal the active reservation can remain until Manager/application restart |
+| SessionSupervisor exits                | active RunSession is lost as above; Manager survives; SessionSupervisor and Bandit restart; no replacement run starts                                                                                                        |
+| RunManager exits                       | every run ID, projection, sequence, replay entry, terminal, and subscription is lost; Manager, SessionSupervisor, and Bandit restart; old sessions are cancelled, never replayed                                             |
+| Runtime RunServer exits                | owner-only await returns `runtime_lost`; API exposes one interrupted settlement-unproven terminal; Runtime work is not replayed                                                                                              |
+| normal application shutdown            | Bandit stops first, sessions request cancellation while Manager and lower cleanup infrastructure remain; terminal delivery is not guaranteed                                                                                 |
+| application/VM loss or fresh start     | all API memory and sequence identity are lost; no in-tree recovery or durable replay exists                                                                                                                                  |
 
 RunSession loss alone does not erase Manager replay. Manager loss, application stop
 or restart, VM/host loss, completed-run eviction, and sliding prefix eviction are
@@ -300,33 +316,34 @@ the conditions that lose some or all replay. Listener loss is explicitly not one
 
 ## Wire Content And Authority Boundary
 
-| Direction | Allowed content | Authority that must not cross |
-| --- | --- | --- |
-| client to server | request ID, prompt, absolute `cwd`, optional allowlisted model, lowering-only seven-field Budget, server-issued run ID, replay cursor, empty ping payload | credentials, capability booleans/sets, Provider modules, instructions, callbacks, sinks, openers, Runtime Options, Workspace/Tool limits, handles, PIDs, references, functions |
-| server to client | protocol/replay mode, run ID/status, configured model, run/turn/tool/Provider identifiers, text deltas, bounded projection/counters, public Tool status/metadata, five-field Result, closed sanitized Agent/Runtime/API errors | Provider `final_response`, Runtime Run, Workspace Handle, Config, callbacks, raw exceptions/stacktraces/process reasons, decoder internals, credentials or authorization material |
+| Direction        | Allowed content                                                                                                                                                                                                                | Authority that must not cross                                                                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| client to server | request ID, prompt, absolute `cwd`, optional allowlisted model, lowering-only seven-field Budget, server-issued run ID, replay cursor, empty ping payload                                                                      | credentials, capability booleans/sets, Provider modules, instructions, callbacks, sinks, openers, Runtime Options, Workspace/Tool limits, handles, PIDs, references, functions    |
+| server to client | protocol/replay mode, launch `cwd`, run ID/status, configured model, run/turn/tool/Provider identifiers, text deltas, bounded projection/counters, public Tool status/metadata, five-field Result, closed sanitized Agent/Runtime/API errors | Provider `final_response`, Runtime Run, Workspace Handle, Config, callbacks, raw exceptions/stacktraces/process reasons, decoder internals, credentials or authorization material |
 
-Prompt and `cwd` are not echoed in ordinary frames. Model output may appear only at
+The launch `cwd` appears only in `server.hello`; a command-selected `cwd` is not
+echoed. Model output may appear only at
 `payload.event.delta`, `payload.projection.text`, `payload.result.text`, and
 `payload.terminal.result.text`. Agent error message/details are also explicit
 bounded wire content. Tool process output is not a raw API event field. Fresh
 string-keyed maps, never generic struct serialization, enforce this allowlist.
 
-The run ID is a lookup and cancellation identifier, not authentication. Any same-user
+The run ID is a lookup and cancellation identifier, not authentication. Any local
 process able to connect and learn it may act under trusted server policy.
 
 ## Deterministic Verification Map
 
-| Behavior | Deterministic evidence without Tokamak |
-| --- | --- |
-| Config, Protocol, Wire, limits, atom safety | pure contract, boundary, fixed-seed JSON, and exact-map tests |
-| Manager projection, sequence, replay, cancellation, eviction | isolated GenServer tests with injected session starter and cancellation callback |
-| RunSession ownership and races | injected RuntimeBoundary process tests proving one PID starts/awaits and cancellation registration order |
-| Socket ordering, cursors, violations, mailbox bounds | direct WebSock callback tests with controlled Manager replies |
-| Host, Origin, framing, close codes, capacity | real loopback Bandit/Gun tests on port zero |
-| complete Agent/Tool lifecycle | external Gun/JSON client plus Fake Provider and controlled Fake Workspace |
-| real process cancellation and cleanup | Fake Provider plus temporary Real Workspace; no network model dependency |
-| restart and shutdown consequences | explicit process kills and an external application-shutdown BEAM fixture |
-| disclosure | distinct content, credential, callback, Provider-response, and opaque-authority sentinels across wire, logs, inspection, and status |
+| Behavior                                                     | Deterministic evidence without Tokamak                                                                                              |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Config, Protocol, Wire, limits, atom safety                  | pure contract, boundary, fixed-seed JSON, and exact-map tests                                                                       |
+| Manager projection, sequence, replay, cancellation, eviction | isolated GenServer tests with injected session starter and cancellation callback                                                    |
+| RunSession ownership and races                               | injected RuntimeBoundary process tests proving one PID starts/awaits and cancellation registration order                            |
+| Socket ordering, cursors, violations, mailbox bounds         | direct WebSock callback tests with controlled Manager replies                                                                       |
+| Host, Origin, framing, close codes, capacity                 | real loopback Bandit/Gun tests on port zero                                                                                         |
+| complete Agent/Tool lifecycle                                | external Gun/JSON client plus Fake Provider and controlled Fake Workspace                                                           |
+| real process cancellation and cleanup                        | Fake Provider plus temporary Real Workspace; no network model dependency                                                            |
+| restart and shutdown consequences                            | explicit process kills and an external application-shutdown BEAM fixture                                                            |
+| disclosure                                                   | distinct content, credential, callback, Provider-response, and opaque-authority sentinels across wire, logs, inspection, and status |
 
 Every receive is bounded, scheduler races use monitors/messages/barriers instead of
 finite sleeps, and the shared acceptance client imports only Gun and JSON. The two
@@ -337,10 +354,12 @@ real Tokamak scenarios are separately tagged `:live_tokamak`, excluded from norm
 
 `Synapse.API.Config` is the only public Phase 1 API module. `new/1` validates
 trusted atom-keyed application policy without reading environment or starting a
-resource. `load/2` additionally reads only `SYNAPSE_API_PORT` and `SYNAPSE_MODEL`
-through an injected reader. Environment port zero is forbidden; trusted test
-configuration may use it. An enabled API requires an explicit default model from
-trusted configuration or `SYNAPSE_MODEL`; allowlist order never selects a model.
+resource. `load/2` additionally reads only `SYNAPSE_API_PORT`, `SYNAPSE_MODEL`, and
+`SYNAPSE_MAX_OUTPUT_BYTES` through an injected reader. Environment port zero is
+forbidden; trusted test configuration may use it. The aggregate output value must
+be a canonical integer in `1..524288`. An enabled API requires an explicit default
+model from trusted configuration or `SYNAPSE_MODEL`; allowlist order never selects
+a model.
 
 Production capabilities enable read, write, and same-user process execution.
 They cannot be supplied to `lower_budget/2`, which accepts only the seven known
@@ -350,41 +369,44 @@ validated, inspect-redacted `Synapse.Runtime.Options`.
 
 The hard-limit fields and protected resources are:
 
-| Config field | Default | Protected resource |
-| --- | ---: | --- |
-| `max_incoming_message_bytes` | 2,097,152 | assembled client JSON allocation |
-| `max_incoming_frame_payload_bytes` | 2,097,152 | one incoming frame payload |
-| `max_outgoing_message_bytes` | 1,048,576 | one encoded frame, including a completed snapshot |
-| `max_prompt_bytes` | 262,144 | retained user input and escaped start command |
-| `max_request_id_bytes` | 128 | per-command correlation state |
-| `max_run_id_bytes` | 64 | run lookup keys |
-| `max_origin_bytes` | 512 | Origin parsing work |
-| `max_json_depth` | 16 | decoder traversal and stack work |
-| `max_json_object_keys` | 32 | one decoded object |
-| `max_json_array_elements` | 128 | one decoded array |
-| `max_json_nodes` | 4,096 | aggregate decoded tree |
-| `max_http_request_line_bytes` | 8,192 | HTTP request-line allocation |
-| `max_http_headers` | 32 | HTTP header collection |
-| `max_http_header_line_bytes` | 1,024 | one HTTP header line |
-| `max_http_header_bytes` | 32,768 | aggregate header names and values |
-| `connection_inactivity_ms` | 60,000 | inbound-idle socket lifetime |
-| `max_protocol_violations` | 8 | repeated invalid-command work |
-| `max_connections` | 128 | concurrent socket processes |
-| `max_subscriptions_per_socket` | 16 | per-client cursor state |
-| `max_subscribers_per_run` | 128 | run fanout state |
-| `max_replay_events` | 2,048 | retained replay entries, including terminal |
-| `max_replay_bytes` | 4,194,304 | encoded replay plus fixed entry overhead |
-| `max_projection_text_bytes` | 64,000 | accumulated assistant text |
-| `max_pull_events` | 64 | one replay pull batch |
-| `max_pull_bytes` | 1,048,576 | one encoded pull response batch |
-| `max_completed_runs` | 16 | process-lifetime completed lookup |
-| `max_active_state_bytes` | 6,291,456 | one active run plus terminal/snapshot reserve |
-| `max_aggregate_state_bytes` | 16,777,216 | all retained API run state |
+| Config field                       |    Default | Protected resource                                |
+| ---------------------------------- | ---------: | ------------------------------------------------- |
+| `max_incoming_message_bytes`       |  2,097,152 | assembled client JSON allocation                  |
+| `max_incoming_frame_payload_bytes` |  2,097,152 | one incoming frame payload                        |
+| `max_outgoing_message_bytes`       |  3,276,800 | one encoded frame, including a completed snapshot |
+| `max_prompt_bytes`                 |    262,144 | retained user input and escaped start command     |
+| `max_request_id_bytes`             |        128 | per-command correlation state                     |
+| `max_run_id_bytes`                 |         64 | run lookup keys                                   |
+| `max_origin_bytes`                 |        512 | Origin parsing work                               |
+| `max_json_depth`                   |         16 | decoder traversal and stack work                  |
+| `max_json_object_keys`             |         32 | one decoded object                                |
+| `max_json_array_elements`          |        128 | one decoded array                                 |
+| `max_json_nodes`                   |      4,096 | aggregate decoded tree                            |
+| `max_http_request_line_bytes`      |      8,192 | HTTP request-line allocation                      |
+| `max_http_headers`                 |         32 | HTTP header collection                            |
+| `max_http_header_line_bytes`       |      1,024 | one HTTP header line                              |
+| `max_http_header_bytes`            |     32,768 | aggregate header names and values                 |
+| `connection_inactivity_ms`         |     60,000 | inbound-idle socket lifetime                      |
+| `max_protocol_violations`          |          8 | repeated invalid-command work                     |
+| `max_connections`                  |        128 | concurrent socket processes                       |
+| `max_subscriptions_per_socket`     |         16 | per-client cursor state                           |
+| `max_subscribers_per_run`          |        128 | run fanout state                                  |
+| `max_replay_events`                |      2,048 | retained replay entries, including terminal       |
+| `max_replay_bytes`                 |  4,194,304 | encoded replay plus fixed entry overhead          |
+| `max_projection_text_bytes`        |    524,288 | accumulated assistant text                        |
+| `max_pull_events`                  |         64 | one replay pull batch                             |
+| `max_pull_bytes`                   |  3,276,800 | one encoded pull response batch                   |
+| `max_completed_runs`               |         16 | process-lifetime completed lookup                 |
+| `max_active_state_bytes`           |  8,388,608 | one active run plus terminal/snapshot reserve     |
+| `max_aggregate_state_bytes`        | 16,777,216 | all retained API run state                        |
 
-Config validates cross-resource relationships. Worst-case JSON escaping for both
-projection text and duplicated successful terminal text must fit one completed
-snapshot. Projection capacity must cover the server output Budget, pull capacity
-equals one outgoing message, replay fits one maximum frame plus entry overhead,
+Config validates cross-resource relationships. A completed snapshot encodes
+`projection.text` as `""` and carries successful final text once in
+`terminal.result.text`; active, failed, and interrupted snapshots retain committed
+projection text. One maximum content-bearing value under worst-case sixfold JSON
+escaping plus a 131,072-byte envelope reserve must fit one message. Projection
+capacity must cover the server output Budget, pull capacity equals one outgoing
+message, replay fits one maximum frame plus entry overhead,
 HTTP per-line/count limits must fit aggregate headers,
 and replay/projection/snapshot reserves plus worst-case identifiers, subscribers,
 and fixed run overhead must fit active and aggregate state.
@@ -538,15 +560,15 @@ than guessing state or exposing the term.
 
 Close policy is:
 
-| Condition | Code | Additional message |
-| --- | ---: | --- |
-| Complete binary application message | 1003 | none |
-| Ninth ordinary protocol violation | 1008 | none |
-| Oversized assembled text message | 1009 | none |
-| Unsafe internal callback, Manager, or cursor state | 1011 | none |
-| Invalid UTF-8 text | Bandit-owned 1007 | none |
-| Malformed framing | Bandit-owned RFC 6455 code | none |
-| Oversized frame or fragmented message | Bandit-owned 1009 | none |
+| Condition                                          |                       Code | Additional message |
+| -------------------------------------------------- | -------------------------: | ------------------ |
+| Complete binary application message                |                       1003 | none               |
+| Ninth ordinary protocol violation                  |                       1008 | none               |
+| Oversized assembled text message                   |                       1009 | none               |
+| Unsafe internal callback, Manager, or cursor state |                       1011 | none               |
+| Invalid UTF-8 text                                 |          Bandit-owned 1007 | none               |
+| Malformed framing                                  | Bandit-owned RFC 6455 code | none               |
+| Oversized frame or fragmented message              |          Bandit-owned 1009 | none               |
 
 Violations one through eight receive one fixed `server.error`; successful commands
 and valid-command domain errors do not reset or increment the count. Bandit rejects
@@ -584,6 +606,7 @@ The task reads only:
 ```text
 SYNAPSE_MODEL       required unless trusted enabled config supplies a model
 SYNAPSE_API_PORT    optional canonical decimal port, default 4848
+SYNAPSE_MAX_OUTPUT_BYTES optional canonical integer in 1..524288, default 524288
 ```
 
 `TOKAMAK_API_KEY` is not a server-startup requirement and remains request-time
@@ -743,9 +766,16 @@ marker; after terminal the test independently checks `hello.txt`, that marker fi
 and the verification command's exit status and output.
 
 After the coding terminal, a completed authoritative snapshot carries the same
-terminal without duplication. The RunSession exits normally and the production
+terminal without duplicating final text: wire `projection.text` is `""`, while
+`terminal.result.text` is authoritative. The browser reconstructs its projection
+from that Result. The RunSession exits normally and the production
 Runtime, Task, and Workspace supervisors are empty before the emergency cleanup net
 runs. Both temporary roots are explicitly removed and checked absent.
+
+Protocol v1 still sends each snapshot as one complete WebSocket message. Supporting
+multi-megabyte aggregate output safely requires a chunked snapshot protocol with
+bounded reassembly and generation/cursor validation; increasing the current
+524,288-byte policy beyond its proved frame and state ceilings is rejected.
 
 Every live handshake header, hello, event, snapshot, terminal, pong, command, and
 captured startup/run/shutdown log is checked for the raw and trimmed real API key

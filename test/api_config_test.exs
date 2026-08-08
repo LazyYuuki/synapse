@@ -9,6 +9,8 @@ defmodule Synapse.API.ConfigTest do
 
   doctest Config
 
+  @launch_cwd "/synthetic/api-config-launch"
+
   @limit_fields [
     :max_incoming_message_bytes,
     :max_incoming_frame_payload_bytes,
@@ -47,6 +49,7 @@ defmodule Synapse.API.ConfigTest do
     assert config.enabled == false
     assert config.ip == {127, 0, 0, 1}
     assert config.port == 4_848
+    assert config.launch_cwd == nil
     assert config.model_allowlist == []
     assert config.default_model == nil
     assert config.budget == Budget.default()
@@ -56,7 +59,7 @@ defmodule Synapse.API.ConfigTest do
     assert Map.take(Map.from_struct(config), @limit_fields) == %{
              max_incoming_message_bytes: 2_097_152,
              max_incoming_frame_payload_bytes: 2_097_152,
-             max_outgoing_message_bytes: 1_048_576,
+             max_outgoing_message_bytes: 3_276_800,
              max_prompt_bytes: 262_144,
              max_request_id_bytes: 128,
              max_run_id_bytes: 64,
@@ -76,24 +79,30 @@ defmodule Synapse.API.ConfigTest do
              max_subscribers_per_run: 128,
              max_replay_events: 2_048,
              max_replay_bytes: 4_194_304,
-             max_projection_text_bytes: 64_000,
+             max_projection_text_bytes: 524_288,
              max_pull_events: 64,
-             max_pull_bytes: 1_048_576,
+             max_pull_bytes: 3_276_800,
              max_completed_runs: 16,
-             max_active_state_bytes: 6_291_456,
+             max_active_state_bytes: 8_388_608,
              max_aggregate_state_bytes: 16_777_216
            }
 
     assert Config.max_incoming_frame_wire_bytes(config) == 2_097_166
   end
 
-  test "environment overrides port and default model without widening the allowlist" do
-    environment = environment(%{"SYNAPSE_API_PORT" => "5858", "SYNAPSE_MODEL" => "model-b"})
+  test "environment overrides port, model, and aggregate output without widening policy" do
+    environment =
+      environment(%{
+        "SYNAPSE_API_PORT" => "5858",
+        "SYNAPSE_MODEL" => "model-b",
+        "SYNAPSE_MAX_OUTPUT_BYTES" => "262144"
+      })
 
     assert {:ok, config} =
              Config.load(
                [
                  enabled: true,
+                 launch_cwd: @launch_cwd,
                  model_allowlist: ["model-a", "model-b"],
                  default_model: "model-a"
                ],
@@ -103,10 +112,28 @@ defmodule Synapse.API.ConfigTest do
     assert config.port == 5_858
     assert config.default_model == "model-b"
     assert config.model_allowlist == ["model-a", "model-b"]
+    assert config.budget.max_output_bytes == 262_144
+
+    {:ok, application_budget} = Budget.new(max_output_bytes: 64_000)
+
+    assert {:ok, lowered_only} =
+             Config.load(
+               [budget: application_budget],
+               environment(%{"SYNAPSE_MAX_OUTPUT_BYTES" => "524288"})
+             )
+
+    assert lowered_only.budget.max_output_bytes == 64_000
+
+    for {raw, expected} <- [{"1", 1}, {"524288", 524_288}] do
+      assert {:ok, boundary} =
+               Config.load([], environment(%{"SYNAPSE_MAX_OUTPUT_BYTES" => raw}))
+
+      assert boundary.budget.max_output_bytes == expected
+    end
 
     assert {:error, {:default_model, :must_be_allowlisted}} =
              Config.load(
-               [enabled: true, model_allowlist: ["model-a"]],
+               [enabled: true, launch_cwd: @launch_cwd, model_allowlist: ["model-a"]],
                environment
              )
 
@@ -125,6 +152,20 @@ defmodule Synapse.API.ConfigTest do
                Config.load([], environment(%{"SYNAPSE_MODEL" => value}))
     end
 
+    for value <- [
+          "",
+          "0",
+          "01",
+          "+1",
+          "524289",
+          "12x",
+          " 64000",
+          "SYNTHETIC_OUTPUT_SECRET"
+        ] do
+      assert {:error, {:environment, :invalid_max_output_bytes}} =
+               Config.load([], environment(%{"SYNAPSE_MAX_OUTPUT_BYTES" => value}))
+    end
+
     assert {:error, {:environment, :unavailable}} =
              Config.load([], fn _name -> raise "secret" end)
 
@@ -133,13 +174,16 @@ defmodule Synapse.API.ConfigTest do
   end
 
   test "model default and allowlist normalization remain bounded" do
-    assert {:ok, config} = Config.new(enabled: true, default_model: "model-a")
+    assert {:ok, config} =
+             Config.new(enabled: true, launch_cwd: @launch_cwd, default_model: "model-a")
+
     assert config.model_allowlist == ["model-a"]
     assert config.default_model == "model-a"
 
     assert {:ok, config} =
              Config.new(
                enabled: true,
+               launch_cwd: @launch_cwd,
                model_allowlist: ["model-a", "model-a", "model-b"],
                default_model: "model-a"
              )
@@ -169,6 +213,31 @@ defmodule Synapse.API.ConfigTest do
              )
 
     assert independent_policy.model_allowlist == ["model-a", "model-b"]
+  end
+
+  test "enabled policy requires one bounded absolute launch directory" do
+    assert {:error, {:launch_cwd, :required_when_enabled}} =
+             Config.new(enabled: true, default_model: "model-a")
+
+    maximum = "/" <> String.duplicate("c", 4_095)
+
+    assert {:ok, config} =
+             Config.new(enabled: true, default_model: "model-a", launch_cwd: maximum)
+
+    assert config.launch_cwd == maximum
+
+    for invalid <- [
+          "",
+          "   ",
+          "relative",
+          "/bad\0path",
+          <<255>>,
+          maximum <> "c",
+          42
+        ] do
+      assert {:error, {:launch_cwd, :must_be_bounded_absolute_path}} =
+               Config.new(launch_cwd: invalid)
+    end
   end
 
   test "trusted startup policy rejects malformed fields and remote authority" do
@@ -257,7 +326,7 @@ defmodule Synapse.API.ConfigTest do
                max_replay_bytes:
                  Config.default().max_outgoing_message_bytes +
                    Config.replay_entry_overhead_bytes(),
-               max_pull_bytes: 1_048_576
+               max_pull_bytes: Config.default().max_pull_bytes
              )
 
     assert independently_lowered.max_completed_runs == 1
@@ -274,9 +343,14 @@ defmodule Synapse.API.ConfigTest do
 
     assert {:error, {:max_aggregate_state_bytes, :incompatible_limit}} =
              Config.new(max_aggregate_state_bytes: 6_000_000)
+
+    {:ok, oversized_api_budget} = Budget.new(max_output_bytes: 524_289)
+
+    assert {:error, {:budget, :max_output_bytes_exceeds_api_limit}} =
+             Config.new(budget: oversized_api_budget)
   end
 
-  test "default outgoing limit fits a completed snapshot with worst-case escaped text twice" do
+  test "default outgoing limit fits one worst-case escaped completed Result" do
     config = Config.default()
     text = String.duplicate(<<0>>, config.budget.max_output_bytes)
 
@@ -294,7 +368,7 @@ defmodule Synapse.API.ConfigTest do
           "status" => "completed",
           "model" => "model-a",
           "turn" => 1,
-          "text" => text,
+          "text" => "",
           "active_tool" => nil,
           "provider_attempts" => 1,
           "tool_calls" => 0,
@@ -384,6 +458,7 @@ defmodule Synapse.API.ConfigTest do
 
     {:ok, config} =
       Config.new(
+        launch_cwd: path,
         model_allowlist: [secret],
         default_model: secret,
         runtime_options: runtime_options
@@ -497,6 +572,7 @@ defmodule Synapse.API.ConfigTest do
     {:ok, config} =
       Config.new(
         enabled: true,
+        launch_cwd: @launch_cwd,
         model_allowlist: ["model-a"],
         default_model: "model-a"
       )
@@ -589,7 +665,12 @@ defmodule Synapse.API.ConfigTest do
 
     projection = %{API.Projection.new() | model: "model-a", active_tool: tool}
     assert API.Projection.valid?(projection, config)
-    refute API.Projection.valid?(%{projection | text: String.duplicate("x", 64_001)}, config)
+
+    refute API.Projection.valid?(
+             %{projection | text: String.duplicate("x", config.max_projection_text_bytes + 1)},
+             config
+           )
+
     refute API.Projection.valid?(%{projection | turn: 9_223_372_036_854_775_808}, config)
 
     assert {:ok, subscriber} =

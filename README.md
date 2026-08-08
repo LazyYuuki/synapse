@@ -69,12 +69,27 @@ maintenance, debugging, and deferred architecture are explained in
 
 Local WebSocket API Phases 0-10 are complete. `mix synapse.server` adds a
 loopback-only protocol-v1 endpoint with one active run, disconnect-safe execution,
-bounded process-lifetime snapshots/replay, explicit stale-cursor reset, and strict
-same-user local trust. It serves no frontend and accepts no credentials, capability
+bounded process-lifetime snapshots/replay, explicit stale-cursor reset, and a
+trusted local-host boundary without authentication. It serves no frontend and accepts no credentials, capability
 grants, Provider selection, callbacks, handles, or Runtime options. The detailed
 contract is in [`docs/plan/PLAN-API.md`](docs/plan/PLAN-API.md); the protocol,
 ownership, failure, security, and maintenance guide is
 [`docs/learning/API.md`](docs/learning/API.md).
+
+Aggregate model-visible run output defaults to 524,288 bytes. A trusted server
+operator may lower it with `SYNAPSE_MAX_OUTPUT_BYTES=1..524288`; the effective
+ceiling is advertised to the browser in `server.hello`. Individual Provider output,
+Tool argument/result, and streamed-delta limits remain independently bounded.
+
+The independent Svelte 5 web client under `ui/web` implements protocol v1 without
+SvelteKit, a proxy, or Synapse-served assets. It supports explicit start/cancel,
+disconnect-safe reconnect and bounded replay/snapshot restoration, responsive
+accessible presentation, deterministic Fake-backed browser acceptance, and explicit
+opt-in live Tokamak acceptance. The server launch directory becomes the UI's
+editable initial Workspace path; this is a starting directory, not a Bash sandbox.
+Operation and maintenance guidance is in
+[`ui/web/README.md`](ui/web/README.md) and
+[`docs/learning/UI.md`](docs/learning/UI.md).
 
 The step-by-step plan for the first functional model-tool-loop MVP is [`docs/plan/PLAN.md`](docs/plan/PLAN.md).
 
@@ -788,9 +803,11 @@ An MCP adapter can discover remote capabilities and register them in the same to
 
 ## Client And TUI
 
-The current MVP includes no bundled client. External clients use protocol-v1 text
-JSON over `ws://127.0.0.1:4848/v1/socket`. It supports one active run and bounded
-reconnect replay only while RunManager retains the run. See
+Synapse bundles and serves no client assets. The repository does contain an
+independently built Svelte 5 client under `ui/web`; it uses protocol-v1 text JSON
+directly over `ws://127.0.0.1:4848/v1/socket`. It supports one active run and
+bounded reconnect replay only while RunManager retains the run. See
+[`docs/learning/UI.md`](docs/learning/UI.md) for client maintenance and
 [`docs/learning/API.md`](docs/learning/API.md) for the exact contract.
 
 A future persistent daemon may add a deliberately versioned Unix-domain-socket
@@ -804,7 +821,9 @@ transport. That future protocol may support:
 It must not silently reinterpret WebSocket protocol v1 or imply that current replay
 is durable.
 
-The first client should be a basic text and JSON interface. A full-screen TUI can follow after the protocol and event model stabilize.
+The web client is the first basic text and JSON interface. A full-screen TUI can
+follow after the protocol and event model stabilize; it remains an independent
+protocol client rather than part of the BEAM supervision tree.
 
 Bubble Tea is a Go library and libvaxis is a Zig library. Either can be used in a separate frontend process. Synapse should not wrap a terminal framework in a NIF because a frontend bug must not crash or block the BEAM VM.
 
@@ -876,8 +895,8 @@ VM death remain explicit limitations.
 
 The current local API adds no authentication boundary. Loopback binding and strict
 browser Origin checks reduce accidental exposure, but native clients may omit
-Origin and any same-user process can request all authority allowed by trusted
-server policy. `process.exec` therefore carries the same host authority and
+Origin and any local process able to reach the listener can request all authority
+allowed by trusted server policy. `process.exec` therefore carries the same host authority and
 descendant limitations described above. Protocol v1 accepts no credentials,
 capabilities, Provider modules, callbacks, handles, or Runtime options.
 

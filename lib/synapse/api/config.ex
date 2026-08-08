@@ -2,17 +2,18 @@ defmodule Synapse.API.Config do
   @moduledoc """
   Validated trusted startup policy for the local WebSocket API.
 
-  Config centralizes the fixed loopback listener, model allowlist, default model,
-  server Budget, Tool capabilities, Runtime options, and every API-owned hard
-  limit. It is trusted application configuration, not a wire contract. Protocol
-  clients may select an allowlisted model and lower Budget values, but they cannot
-  replace capabilities, Runtime options, callbacks, providers, or limits.
+  Config centralizes the fixed loopback listener, launch directory, model
+  allowlist, default model, server Budget, Tool capabilities, Runtime options, and
+  every API-owned hard limit. It is trusted application configuration, not a wire
+  contract. Protocol clients may select an allowlisted model and lower Budget
+  values, but they cannot replace capabilities, Runtime options, callbacks,
+  providers, or limits.
 
-  `load/2` reads only `SYNAPSE_API_PORT` and `SYNAPSE_MODEL` through an injected
-  environment reader. Environment port `0` is rejected; trusted application
-  configuration may use it for isolated tests. Disabled configuration does not
-  require a model, which keeps ordinary application startup independent of server
-  environment.
+  `load/2` reads only `SYNAPSE_API_PORT`, `SYNAPSE_MODEL`, and
+  `SYNAPSE_MAX_OUTPUT_BYTES` through an injected environment reader. Environment
+  port `0` is rejected; trusted application configuration may use it for isolated
+  tests. Disabled configuration does not require a model, which keeps ordinary
+  application startup independent of server environment.
 
   The incoming prompt ceiling is lower than `Synapse.Run.Request`'s core ceiling
   because the complete escaped `run.start` command must fit one incoming message.
@@ -37,6 +38,7 @@ defmodule Synapse.API.Config do
   @default_port 4_848
   @max_model_bytes 256
   @max_models 128
+  @max_launch_cwd_bytes 4_096
   @websocket_header_bytes 14
   @start_envelope_reserve_bytes 32_768
   @snapshot_envelope_reserve_bytes 131_072
@@ -47,7 +49,7 @@ defmodule Synapse.API.Config do
   @limit_defaults %{
     max_incoming_message_bytes: 2_097_152,
     max_incoming_frame_payload_bytes: 2_097_152,
-    max_outgoing_message_bytes: 1_048_576,
+    max_outgoing_message_bytes: 3_276_800,
     max_prompt_bytes: 262_144,
     max_request_id_bytes: 128,
     max_run_id_bytes: 64,
@@ -67,11 +69,11 @@ defmodule Synapse.API.Config do
     max_subscribers_per_run: 128,
     max_replay_events: 2_048,
     max_replay_bytes: 4_194_304,
-    max_projection_text_bytes: 64_000,
+    max_projection_text_bytes: 524_288,
     max_pull_events: 64,
-    max_pull_bytes: 1_048_576,
+    max_pull_bytes: 3_276_800,
     max_completed_runs: 16,
-    max_active_state_bytes: 6_291_456,
+    max_active_state_bytes: 8_388_608,
     max_aggregate_state_bytes: 16_777_216
   }
 
@@ -88,6 +90,7 @@ defmodule Synapse.API.Config do
     :enabled,
     :ip,
     :port,
+    :launch_cwd,
     :model_allowlist,
     :default_model,
     :budget,
@@ -108,6 +111,7 @@ defmodule Synapse.API.Config do
           enabled: boolean(),
           ip: loopback_ip(),
           port: :inet.port_number(),
+          launch_cwd: String.t() | nil,
           model_allowlist: [String.t()],
           default_model: String.t() | nil,
           budget: Budget.t(),
@@ -147,7 +151,8 @@ defmodule Synapse.API.Config do
   @type validation_error ::
           {:attributes, :must_be_keyword_or_map}
           | {:unknown_fields, [term()]}
-          | {:environment, :unavailable | :invalid_port | :invalid_model}
+          | {:environment,
+             :unavailable | :invalid_port | :invalid_model | :invalid_max_output_bytes}
           | {atom(), atom()}
 
   @doc "Returns validated API-disabled production defaults."
@@ -166,8 +171,10 @@ defmodule Synapse.API.Config do
          {:ok, budget} <- normalize_budget(values.budget),
          {:ok, capabilities} <- normalize_capabilities(values.capabilities),
          {:ok, runtime_options} <- normalize_runtime_options(values.runtime_options),
+         :ok <- validate_api_budget(budget),
          :ok <- validate_limits(values),
          {:ok, model_allowlist, default_model} <- normalize_models(values),
+         :ok <- validate_launch_cwd(values),
          values <-
            Map.merge(values, %{
              budget: budget,
@@ -181,7 +188,7 @@ defmodule Synapse.API.Config do
     end
   end
 
-  @doc "Loads trusted application configuration plus the two supported environment overrides."
+  @doc "Loads trusted application configuration plus the three supported environment overrides."
   @spec load(keyword() | map(), (String.t() -> String.t() | nil)) ::
           {:ok, t()} | {:error, validation_error()}
   def load(
@@ -191,11 +198,10 @@ defmodule Synapse.API.Config do
     with true <- is_function(environment, 1) or {:error, {:environment, :unavailable}},
          {:ok, attrs} <- Validation.attributes(application_config, @allowed_fields),
          {:ok, port} <- environment_port(environment),
-         {:ok, model} <- environment_model(environment) do
-      attrs
-      |> maybe_put(:port, port)
-      |> maybe_put(:default_model, model)
-      |> new()
+         {:ok, model} <- environment_model(environment),
+         {:ok, max_output_bytes} <- environment_max_output_bytes(environment),
+         {:ok, attrs} <- put_environment_output_budget(attrs, max_output_bytes) do
+      attrs |> maybe_put(:port, port) |> maybe_put(:default_model, model) |> new()
     end
   end
 
@@ -247,6 +253,7 @@ defmodule Synapse.API.Config do
       enabled: false,
       ip: @loopback,
       port: @default_port,
+      launch_cwd: nil,
       model_allowlist: [],
       default_model: nil,
       budget: Budget.default(),
@@ -305,6 +312,13 @@ defmodule Synapse.API.Config do
   defp normalize_runtime_options(_options),
     do: {:error, {:runtime_options, :must_be_runtime_options}}
 
+  defp validate_api_budget(%Budget{max_output_bytes: value})
+       when value <= @limit_defaults.max_projection_text_bytes,
+       do: :ok
+
+  defp validate_api_budget(%Budget{}),
+    do: {:error, {:budget, :max_output_bytes_exceeds_api_limit}}
+
   defp validate_limits(values) do
     case Enum.find(@limit_fields, fn field ->
            value = values[field]
@@ -352,6 +366,23 @@ defmodule Synapse.API.Config do
   defp add_default_model([], default_model), do: [default_model]
   defp add_default_model(models, _default_model), do: models
 
+  defp validate_launch_cwd(%{enabled: false, launch_cwd: nil}), do: :ok
+
+  defp validate_launch_cwd(%{enabled: true, launch_cwd: nil}),
+    do: {:error, {:launch_cwd, :required_when_enabled}}
+
+  defp validate_launch_cwd(%{launch_cwd: launch_cwd}) do
+    if bounded_absolute_path?(launch_cwd),
+      do: :ok,
+      else: {:error, {:launch_cwd, :must_be_bounded_absolute_path}}
+  end
+
+  defp bounded_absolute_path?(value),
+    do:
+      is_binary(value) and byte_size(value) <= @max_launch_cwd_bytes and
+        String.valid?(value) and String.trim(value) != "" and
+        :binary.match(value, <<0>>) == :nomatch and Path.type(value) == :absolute
+
   defp validate_relationships(values) do
     relationships = [
       {:max_incoming_message_bytes,
@@ -362,7 +393,7 @@ defmodule Synapse.API.Config do
        )},
       {:max_outgoing_message_bytes,
        escaped_size_fits?(
-         values.budget.max_output_bytes + values.max_projection_text_bytes,
+         max(values.budget.max_output_bytes, values.max_projection_text_bytes),
          @snapshot_envelope_reserve_bytes,
          values.max_outgoing_message_bytes
        )},
@@ -434,6 +465,37 @@ defmodule Synapse.API.Config do
         Validation.identifier?(value, @max_model_bytes) -> {:ok, value}
         true -> {:error, {:environment, :invalid_model}}
       end
+    end
+  end
+
+  defp environment_max_output_bytes(environment) do
+    with {:ok, value} <- read_environment(environment, "SYNAPSE_MAX_OUTPUT_BYTES") do
+      case value do
+        nil -> {:ok, nil}
+        value -> parse_environment_max_output_bytes(value)
+      end
+    end
+  end
+
+  defp parse_environment_max_output_bytes(value) do
+    with true <- Regex.match?(~r/^[1-9][0-9]*$/, value),
+         {bytes, ""} when bytes <= 524_288 <- Integer.parse(value) do
+      {:ok, bytes}
+    else
+      _invalid -> {:error, {:environment, :invalid_max_output_bytes}}
+    end
+  end
+
+  defp put_environment_output_budget(attrs, nil), do: {:ok, attrs}
+
+  defp put_environment_output_budget(attrs, max_output_bytes) do
+    case normalize_budget(Map.get(attrs, :budget, Budget.default())) do
+      {:ok, budget} ->
+        effective = min(max_output_bytes, budget.max_output_bytes)
+        {:ok, Map.put(attrs, :budget, %{budget | max_output_bytes: effective})}
+
+      {:error, _reason} = error ->
+        error
     end
   end
 

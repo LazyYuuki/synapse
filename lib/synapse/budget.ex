@@ -29,7 +29,7 @@ defmodule Synapse.Budget do
   | `max_wall_time_ms` | milliseconds | 900,000 | monotonic run lifetime |
   | `provider_inactivity_ms` | milliseconds | 120,000 | silence within one Provider attempt |
   | `tool_inactivity_ms` | milliseconds | 180,000 | silence within applicable Tool processes |
-  | `max_output_bytes` | UTF-8/canonical JSON bytes | 64,000 | newly projected model-visible output |
+  | `max_output_bytes` | UTF-8/canonical JSON bytes | 524,288 | newly projected model-visible output |
   | `max_provider_retries` | additional attempts | 2 | safe pre-output Provider retries |
 
   Provider and Tool contracts retain independent hard ceilings. Budget can lower
@@ -51,7 +51,7 @@ defmodule Synapse.Budget do
     max_wall_time_ms: 900_000,
     provider_inactivity_ms: 120_000,
     tool_inactivity_ms: 180_000,
-    max_output_bytes: 64_000,
+    max_output_bytes: 524_288,
     max_provider_retries: 2
   }
 
