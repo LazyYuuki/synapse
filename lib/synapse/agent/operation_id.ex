@@ -4,8 +4,8 @@ defmodule Synapse.Agent.OperationId do
 
   Agent uses a lowercase SHA-256 digest of the validated Run ID so operation IDs
   expose no prompt, path, model output, Tool arguments, or arbitrary Provider
-  identifier. Fixed four-digit turn/attempt/call ordinals are deterministic for
-  fixtures and fit the stricter 256-byte Tool/Workspace ceiling.
+  identifier. Ordinals are padded to four digits for stable ordinary-run fixtures
+  and may grow within the signed accounting range.
 
   ## Example
 
@@ -17,14 +17,13 @@ defmodule Synapse.Agent.OperationId do
   alias Synapse.Tool.Validation
 
   @max_run_id_bytes 256
-  @max_ordinal 9_999
 
-  @typedoc "An invalid trusted Run ID or one-based bounded ordinal."
+  @typedoc "An invalid trusted Run ID or one-based signed ordinal."
   @type error ::
           {:run_id, :must_be_bounded_non_empty_utf8_identifier}
-          | {:turn, :must_be_one_based_four_digit_ordinal}
-          | {:attempt, :must_be_one_based_four_digit_ordinal}
-          | {:call, :must_be_one_based_four_digit_ordinal}
+          | {:turn, :must_be_one_based_ordinal}
+          | {:attempt, :must_be_one_based_ordinal}
+          | {:call, :must_be_one_based_ordinal}
 
   @doc "Builds one Provider-attempt operation ID."
   @spec provider(String.t(), pos_integer(), pos_integer()) ::
@@ -55,11 +54,11 @@ defmodule Synapse.Agent.OperationId do
   end
 
   defp validate_ordinal(_field, value)
-       when is_integer(value) and value >= 1 and value <= @max_ordinal,
+       when is_integer(value) and value >= 1 and value <= 9_223_372_036_854_775_807,
        do: :ok
 
   defp validate_ordinal(field, _value),
-    do: {:error, {field, :must_be_one_based_four_digit_ordinal}}
+    do: {:error, {field, :must_be_one_based_ordinal}}
 
   defp digest(run_id),
     do: :crypto.hash(:sha256, run_id) |> Base.encode16(case: :lower)

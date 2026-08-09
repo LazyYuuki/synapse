@@ -37,7 +37,7 @@ defmodule Synapse.Runtime.AwaitTest.Provider do
   defp provider_error(operation_id, output_started) do
     {:ok, error} =
       Provider.Error.new(
-        kind: if(output_started, do: :interrupted, else: :unavailable),
+        kind: if(output_started, do: :protocol, else: :unavailable),
         message: "Provider request failed",
         retryable: false,
         output_started: output_started,

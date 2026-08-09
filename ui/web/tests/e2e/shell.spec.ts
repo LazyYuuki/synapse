@@ -41,17 +41,6 @@ test('conversation uses a locked panel with its own scroll viewport', async ({ p
   expect(layout.timelineOverflowY).toBe('scroll');
 });
 
-test('expanded Budget remains reachable without horizontal overflow', async ({ page }) => {
-  await page.goto('/');
-  await page.getByText('Advanced budget limits').click();
-  await expect(page.getByLabel('Maximum turns')).toBeVisible();
-
-  const hasOverflow = await page
-    .locator('html')
-    .evaluate((root) => root.scrollWidth > root.clientWidth);
-  expect(hasOverflow).toBe(false);
-});
-
 test('connection controls remain inside the viewport at intermediate widths', async ({ page }) => {
   for (const width of [320, 561, 590, 620, 768, 1024]) {
     await page.setViewportSize({ width, height: 900 });
@@ -88,9 +77,9 @@ test('required controls, disclosure, and keyboard focus remain accessible', asyn
     .evaluate((element) => getComputedStyle(element).outlineStyle);
   expect(outline).not.toBe('none');
 
-  await page.getByText('Advanced budget limits').focus();
+  await page.getByText('Protocol inspector').focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByLabel('Maximum turns')).toBeVisible();
+  await expect(page.locator('details.protocol-disclosure')).toHaveAttribute('open', '');
   await expect(page.locator('[aria-live="polite"]')).not.toHaveCount(0);
 });
 

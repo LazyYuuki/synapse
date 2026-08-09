@@ -8,16 +8,6 @@
 export type RequestId = string;
 export type RunId = string;
 
-export type Budget = {
-  max_turns: number;
-  max_tool_calls: number;
-  max_wall_time_ms: number;
-  provider_inactivity_ms: number;
-  tool_inactivity_ms: number;
-  max_output_bytes: number;
-  max_provider_retries: number;
-};
-
 export type ClientEnvelope<TType extends string, TPayload> = {
   version: 1;
   type: TType;
@@ -36,7 +26,6 @@ export type StartCommand = ClientEnvelope<
     prompt: string;
     cwd: string;
     model?: string;
-    budget?: Partial<Budget>;
     conversation?: ConversationMessage[];
   }
 >;
@@ -214,6 +203,7 @@ export type AgentTerminalError = AgentErrorBase &
         reason: 'empty_provider_response' | 'invalid_function_call_batch' | 'tool_admission_failed';
       }
     | { kind: 'tool'; reason: 'tool_ambiguous' }
+    | { kind: 'context'; reason: 'token_limit_exceeded' }
     | {
         kind: 'budget';
         reason:

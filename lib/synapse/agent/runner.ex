@@ -1,6 +1,6 @@
 defmodule Synapse.Agent.Runner do
   @moduledoc """
-  Executes the current synchronous bounded Agent loop.
+  Executes the current synchronous Agent loop.
 
   Runner implements the immutable Provider/Tool continuation loop. It validates
   trusted contracts, creates initial State, emits ordered Run Events,
@@ -10,9 +10,9 @@ defmodule Synapse.Agent.Runner do
 
   A final Response succeeds only when it has no FunctionCalls and its assistant
   Messages join to non-empty text. FunctionCall batches are structurally converted
-  and budgeted as a whole, then executed once each in source order under distinct
-  trusted Tool Contexts. Ordinary Tool errors remain paired and do not stop the
-  batch; ambiguity stops every later call. A complete known batch is projected
+  as a whole, then executed once each in source order under distinct
+  trusted Tool Contexts. Ordinary and ambiguous Tool errors remain paired and do
+  not stop the batch. A complete batch is projected
   atomically into a new State before the next full-history Provider Request.
 
   Runner remains a synchronous function suitable for a temporary supervised Task.
@@ -46,17 +46,15 @@ defmodule Synapse.Agent.Runner do
   State transition because retries do not create logical turns.
 
   Semantic Provider retry is separate from Runtime process supervision.
-  Runner retries only allowlisted retryable failures before any output became
-  visible, reusing the exact immutable Request with a fresh attempt operation ID.
-  Text or Tool-call progress blocks transparent replay because a second attempt
-  could duplicate user-visible output or side effects.
+  Runner retries transient failures up to ten times, reusing the exact immutable
+  Request with a fresh attempt operation ID. An interrupted stream remains safe to
+  retry because Provider progress is observational and Tool calls execute only from
+  a completed terminal Response.
 
   ```text
-  Provider failure before output
-    -> retryable + budget + deadline + not cancelled
+  Transient Provider failure
+    -> retry limit + deadline + not cancelled
     -> bounded delay -> fresh operation ID -> exact same Request
-
-  Provider output started -> interrupted, never replay
   ```
 
   Cancellation uses both a matching operation `cancel_ref` and a persistent
@@ -101,12 +99,22 @@ defmodule Synapse.Agent.Runner do
   terminal Response -> whole-batch Admission
     -> Tool Context -> ToolStarted -> Executor once -> retain Result -> ToolCompleted
     -> next call on :ok/:error
-    -> stop immediately on :ambiguous or event-sink failure
+    -> retain :ok/:error/:ambiguous Results; stop only on event-sink or contract failure
   ```
 
   """
 
-  alias Synapse.Agent.{Admission, Context, Error, OperationId, Projection, Result, State}
+  alias Synapse.Agent.{
+    Admission,
+    Context,
+    ContextWindow,
+    Error,
+    OperationId,
+    Projection,
+    Result,
+    State
+  }
+
   alias Synapse.Provider
   alias Synapse.Provider.{Response, StreamContext}
   alias Synapse.Provider.Event.TextDelta, as: ProviderTextDelta
@@ -114,10 +122,10 @@ defmodule Synapse.Agent.Runner do
   alias Synapse.Run.{Event, Request}
   alias Synapse.Tool.Executor
   alias Synapse.Tool.Context, as: ToolContext
-  alias Synapse.Tool.Limits, as: ToolLimits
   alias Synapse.Tool.Result, as: ToolResult
 
   @attempt 1
+  @max_provider_retries_per_request 10
 
   @doc """
   Runs one validated Request under trusted Context until final text or a terminal Error.
@@ -165,6 +173,10 @@ defmodule Synapse.Agent.Runner do
   defp next_turn(run, context, state) do
     with :ok <- cancellation_guard(context),
          {:ok, provider_request} <- Projection.provider_request(state, context),
+         {:ok, estimated_tokens} <- ContextWindow.estimate_request_tokens(provider_request),
+         true <-
+           estimated_tokens <= ContextWindow.max_input_tokens() or
+             {:error, {:token_limit_exceeded, estimated_tokens, ContextWindow.max_input_tokens()}},
          {:ok, state} <- State.admit_turn(state, monotonic_now()),
          turn <- state.turn,
          {:ok, operation_id} <- OperationId.provider(run.id, turn, @attempt),
@@ -189,15 +201,8 @@ defmodule Synapse.Agent.Runner do
       {:error, :run_cancelled} ->
         fail_before_turn_cancelled(run, context, state)
 
-      {:error, :turn_budget_exhausted} ->
-        fail_before_turn(
-          run,
-          context,
-          state,
-          :turn_budget_exhausted,
-          "Run turn budget exhausted",
-          %{"observed" => state.turn + 1, "maximum" => run.budget.max_turns}
-        )
+      {:error, {:token_limit_exceeded, observed, maximum}} ->
+        fail_context_limit(run, context, state, observed, maximum)
 
       {:error, :wall_time_budget_exhausted} ->
         fail_before_turn(
@@ -373,15 +378,7 @@ defmodule Synapse.Agent.Runner do
          response,
          provider_attempts
        ) do
-    remaining_calls = run.budget.max_tool_calls - state.tool_calls
-    remaining_output = run.budget.max_output_bytes - state.output_bytes
-
-    case Admission.preflight(
-           response,
-           context.tool_limits,
-           remaining_calls,
-           remaining_output
-         ) do
+    case Admission.preflight(response, context.tool_limits) do
       {:ok, admission} ->
         case State.add_output(state, admission.output_bytes) do
           {:ok, state} ->
@@ -392,21 +389,6 @@ defmodule Synapse.Agent.Runner do
               turn,
               operation_id,
               admission,
-              provider_attempts
-            )
-
-          {:error, :output_budget_exhausted} ->
-            fail_budget(
-              run,
-              context,
-              turn,
-              operation_id,
-              :output_budget_exhausted,
-              "Run output budget exhausted",
-              state.output_bytes + admission.output_bytes,
-              run.budget.max_output_bytes,
-              0,
-              0,
               provider_attempts
             )
 
@@ -432,36 +414,6 @@ defmodule Synapse.Agent.Runner do
           operation_id,
           "Provider Response contained an invalid FunctionCall batch",
           :invalid_function_call_batch,
-          0,
-          0,
-          provider_attempts
-        )
-
-      {:error, {:tool_call_budget_exhausted, observed, _remaining}} ->
-        fail_budget(
-          run,
-          context,
-          turn,
-          operation_id,
-          :tool_call_budget_exhausted,
-          "Run Tool-call budget exhausted",
-          state.tool_calls + observed,
-          run.budget.max_tool_calls,
-          0,
-          0,
-          provider_attempts
-        )
-
-      {:error, {:output_budget_exhausted, observed, _remaining}} ->
-        fail_budget(
-          run,
-          context,
-          turn,
-          operation_id,
-          :output_budget_exhausted,
-          "Run output budget exhausted",
-          state.output_bytes + observed,
-          run.budget.max_output_bytes,
           0,
           0,
           provider_attempts
@@ -501,9 +453,6 @@ defmodule Synapse.Agent.Runner do
 
               {:error, :wall_time_budget_exhausted} ->
                 {:halt, {:error, :wall_time_budget_exhausted, executed, turn_output_bytes}}
-
-              {:error, :tool_call_budget_exhausted} ->
-                {:halt, {:error, :tool_call_budget_exhausted, executed, turn_output_bytes}}
 
               {:error, _reason} ->
                 {:halt, {:error, :invalid_tool_context, nil, executed}}
@@ -550,11 +499,6 @@ defmodule Synapse.Agent.Runner do
                ordinal,
                tool_operation_id
              ) do
-          :ok when result.status == :ambiguous ->
-            {:halt,
-             {:ambiguous, call, result, tool_operation_id, Enum.reverse(retained_results),
-              executed, turn_output_bytes}}
-
           :ok ->
             result_bytes = byte_size(result.content)
 
@@ -564,15 +508,11 @@ defmodule Synapse.Agent.Runner do
 
                 if cancelled?(context) do
                   {:halt,
-                   {:error, :run_cancelled, tool_operation_id, executed, next_output_bytes}}
+                   {:error, :run_cancelled, tool_operation_id, executed, next_output_bytes,
+                    ambiguity_details(call, result, tool_operation_id)}}
                 else
                   {:cont, {:ok, retained_results, next_state, executed, next_output_bytes}}
                 end
-
-              {:error, :output_budget_exhausted} ->
-                {:halt,
-                 {:error, :output_budget_exhausted, admitted_state.output_bytes + result_bytes,
-                  executed, turn_output_bytes + result_bytes}}
 
               {:error, _reason} ->
                 {:halt, {:error, :executor_contract, tool_operation_id, executed}}
@@ -635,28 +575,15 @@ defmodule Synapse.Agent.Runner do
   end
 
   defp tool_context(run, context, state, operation_id) do
-    with {:ok, limits} <- effective_tool_limits(context.tool_limits, run.budget) do
-      ToolContext.new(
-        workspace: context.workspace,
-        capabilities: run.capabilities,
-        operation_id: operation_id,
-        cancel_ref: context.cancel_ref,
-        deadline: state.deadline,
-        activity_sink: context.tool_activity_sink,
-        limits: limits
-      )
-    end
-  end
-
-  defp effective_tool_limits(limits, budget) do
-    max_inactivity = min(limits.max_bash_inactivity_ms, budget.tool_inactivity_ms)
-    default_inactivity = min(limits.default_bash_inactivity_ms, max_inactivity)
-
-    ToolLimits.new(%{
-      Map.from_struct(limits)
-      | default_bash_inactivity_ms: default_inactivity,
-        max_bash_inactivity_ms: max_inactivity
-    })
+    ToolContext.new(
+      workspace: context.workspace,
+      capabilities: run.capabilities,
+      operation_id: operation_id,
+      cancel_ref: context.cancel_ref,
+      deadline: state.deadline,
+      activity_sink: context.tool_activity_sink,
+      limits: context.tool_limits
+    )
   end
 
   defp normalize_tool_result(%ToolResult{} = result, call, limits) do
@@ -700,6 +627,18 @@ defmodule Synapse.Agent.Runner do
 
   defp maybe_event_outcome(metadata, _outcome), do: metadata
 
+  defp ambiguity_details(call, %ToolResult{status: :ambiguous}, operation_id) do
+    %{
+      "call_id" => call.call_id,
+      "tool_name" => call.name,
+      "operation_id" => operation_id,
+      "outcome" => "unknown",
+      "status" => "ambiguous"
+    }
+  end
+
+  defp ambiguity_details(_call, _result, _operation_id), do: %{}
+
   defp finish_execution(
          {:ok, results, execution_state, executed, turn_output_bytes},
          run,
@@ -727,49 +666,25 @@ defmodule Synapse.Agent.Runner do
   end
 
   defp finish_execution(
-         {:ambiguous, call, _result, operation_id, _retained_results, executed,
-          turn_output_bytes},
+         {:error, :run_cancelled, operation_id, executed, turn_output_bytes, details},
          run,
          context,
          _state,
          turn,
-         _provider_operation_id,
+         provider_operation_id,
          _admission,
          provider_attempts
        ) do
-    details = %{
-      "call_id" => call.call_id,
-      "tool_name" => call.name,
-      "operation_id" => operation_id,
-      "outcome" => "unknown",
-      "status" => "ambiguous"
-    }
-
-    if cancelled?(context) do
-      fail_cancelled(
-        run,
-        context,
-        turn,
-        operation_id,
-        turn_output_bytes,
-        executed,
-        provider_attempts,
-        details
-      )
-    else
-      {:ok, error} =
-        Error.new(
-          kind: :tool,
-          reason: :tool_ambiguous,
-          message: "Tool result has an unknown side-effect outcome",
-          run_id: run.id,
-          turn: turn,
-          operation_id: operation_id,
-          details: details
-        )
-
-      emit_failure(context, error, :failed, turn_output_bytes, executed, provider_attempts)
-    end
+    fail_cancelled(
+      run,
+      context,
+      turn,
+      operation_id || provider_operation_id,
+      turn_output_bytes,
+      executed,
+      provider_attempts,
+      details
+    )
   end
 
   defp finish_execution(
@@ -794,31 +709,6 @@ defmodule Synapse.Agent.Runner do
   end
 
   defp finish_execution(
-         {:error, :output_budget_exhausted, observed, executed, turn_output_bytes},
-         run,
-         context,
-         _state,
-         turn,
-         provider_operation_id,
-         _admission,
-         provider_attempts
-       ) do
-    fail_budget(
-      run,
-      context,
-      turn,
-      provider_operation_id,
-      :output_budget_exhausted,
-      "Run output budget exhausted",
-      observed,
-      run.budget.max_output_bytes,
-      turn_output_bytes,
-      executed,
-      provider_attempts
-    )
-  end
-
-  defp finish_execution(
          {:error, :wall_time_budget_exhausted, executed, turn_output_bytes},
          run,
          context,
@@ -833,31 +723,6 @@ defmodule Synapse.Agent.Runner do
       context,
       turn,
       provider_operation_id,
-      turn_output_bytes,
-      executed,
-      provider_attempts
-    )
-  end
-
-  defp finish_execution(
-         {:error, :tool_call_budget_exhausted, executed, turn_output_bytes},
-         run,
-         context,
-         _state,
-         turn,
-         provider_operation_id,
-         _admission,
-         provider_attempts
-       ) do
-    fail_budget(
-      run,
-      context,
-      turn,
-      provider_operation_id,
-      :tool_call_budget_exhausted,
-      "Run Tool-call budget exhausted",
-      executed + 1,
-      run.budget.max_tool_calls,
       turn_output_bytes,
       executed,
       provider_attempts
@@ -936,7 +801,6 @@ defmodule Synapse.Agent.Runner do
        ) do
     with {:ok, next_state} <-
            Projection.append_response(state, context, admission.response, results),
-         true <- turn < run.budget.max_turns or {:error, :turn_budget_exhausted},
          true <- not cancelled?(context) or {:error, :run_cancelled},
          true <-
            State.deadline_open?(next_state, monotonic_now()) or
@@ -952,21 +816,6 @@ defmodule Synapse.Agent.Runner do
            ) do
       next_turn(run, context, next_state)
     else
-      {:error, :turn_budget_exhausted} ->
-        fail_budget(
-          run,
-          context,
-          turn,
-          provider_operation_id,
-          :turn_budget_exhausted,
-          "Run turn budget exhausted",
-          turn + 1,
-          run.budget.max_turns,
-          turn_output_bytes,
-          executed,
-          provider_attempts
-        )
-
       {:error, :run_cancelled} ->
         fail_cancelled(
           run,
@@ -1033,21 +882,6 @@ defmodule Synapse.Agent.Runner do
          :ok <- emit(context, :run_completed, run_id: run.id, result: result) do
       {:ok, result}
     else
-      {:error, :output_budget_exhausted} ->
-        fail_budget(
-          run,
-          context,
-          turn,
-          nil,
-          :output_budget_exhausted,
-          "Run output budget exhausted",
-          state.output_bytes + turn_output_bytes,
-          run.budget.max_output_bytes,
-          turn_output_bytes,
-          0,
-          provider_attempts
-        )
-
       {:error, :counter_overflow} ->
         fail_internal(
           run,
@@ -1119,31 +953,25 @@ defmodule Synapse.Agent.Runner do
     emit_failure(context, error, :failed, output_bytes, tool_calls, provider_attempts)
   end
 
-  defp fail_budget(
-         run,
-         context,
-         turn,
-         operation_id,
-         reason,
-         message,
-         observed,
-         maximum,
-         output_bytes,
-         tool_calls,
-         provider_attempts
-       ) do
+  defp fail_context_limit(run, context, state, observed, maximum) do
     {:ok, error} =
       Error.new(
-        kind: :budget,
-        reason: reason,
-        message: message,
+        kind: :context,
+        reason: :token_limit_exceeded,
+        message: "Provider request exceeds the model context limit",
         run_id: run.id,
-        turn: turn,
-        operation_id: operation_id,
+        turn: state.turn,
+        operation_id: nil,
         details: %{"observed" => observed, "maximum" => maximum}
       )
 
-    emit_failure(context, error, :failed, output_bytes, tool_calls, provider_attempts)
+    case emit(context, :run_failed, run_id: run.id, error: error) do
+      :ok ->
+        {:error, error}
+
+      {:error, :event_sink_failed} ->
+        terminal_error(:event_sink_failed, "Run Event sink failed", run.id)
+    end
   end
 
   defp fail_before_turn(run, context, state, reason, message, details) do
@@ -1272,15 +1100,26 @@ defmodule Synapse.Agent.Runner do
           cancelled?(context) ->
             fail_cancelled(run, context, turn, operation_id, 0, 0, attempt)
 
-          safe_retry?(provider_error) ->
+          transient_retry?(provider_error) and
+              attempt <= @max_provider_retries_per_request ->
             retry_provider(
               run,
               context,
               state,
               turn,
               provider_request,
+              attempt
+            )
+
+          transient_retry?(provider_error) ->
+            emit_provider_error(
+              run,
+              context,
+              turn,
+              operation_id,
               attempt,
-              provider_error
+              provider_error,
+              :provider_retry_exhausted
             )
 
           true ->
@@ -1315,9 +1154,10 @@ defmodule Synapse.Agent.Runner do
     end
   end
 
-  defp safe_retry?(provider_error) do
-    provider_error.retryable and not provider_error.output_started and
-      provider_error.kind in [:rate_limited, :unavailable, :timeout, :transport, :upstream]
+  defp transient_retry?(provider_error) do
+    provider_error.kind == :interrupted or
+      (provider_error.retryable and
+         provider_error.kind in [:rate_limited, :unavailable, :timeout, :transport, :upstream])
   end
 
   defp retry_provider(
@@ -1326,8 +1166,7 @@ defmodule Synapse.Agent.Runner do
          state,
          turn,
          provider_request,
-         attempt,
-         provider_error
+         attempt
        ) do
     case State.admit_provider_retry(state, monotonic_now()) do
       {:ok, retry_state} ->
@@ -1383,17 +1222,6 @@ defmodule Synapse.Agent.Runner do
               attempt
             )
         end
-
-      {:error, :provider_retry_budget_exhausted} ->
-        emit_provider_error(
-          run,
-          context,
-          turn,
-          provider_error.operation_id,
-          attempt,
-          provider_error,
-          :provider_retry_exhausted
-        )
 
       {:error, :wall_time_budget_exhausted} ->
         fail_wall_time(run, context, turn, nil, 0, 0, attempt)
@@ -1576,7 +1404,6 @@ defmodule Synapse.Agent.Runner do
     StreamContext.new(
       operation_id: operation_id,
       cancel_ref: context.cancel_ref,
-      inactivity_ms: state.run.budget.provider_inactivity_ms,
       deadline: state.deadline,
       activity_sink: context.provider_activity_sink
     )

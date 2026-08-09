@@ -40,7 +40,6 @@ defmodule Synapse.Agent.Error do
   @max_details_bytes 4_096
   @max_details_entries 32
   @max_details_depth 4
-  @max_turns 100
 
   @reasons_by_kind %{
     internal: [
@@ -55,6 +54,7 @@ defmodule Synapse.Agent.Error do
     provider: [:provider_failed, :provider_interrupted_after_output, :provider_retry_exhausted],
     protocol: [:empty_provider_response, :invalid_function_call_batch, :tool_admission_failed],
     tool: [:tool_ambiguous],
+    context: [:token_limit_exceeded],
     budget: [
       :turn_budget_exhausted,
       :tool_call_budget_exhausted,
@@ -75,7 +75,7 @@ defmodule Synapse.Agent.Error do
   defstruct @allowed_fields
 
   @typedoc "Stable terminal source category."
-  @type kind :: :provider | :tool | :budget | :protocol | :cancelled | :internal
+  @type kind :: :provider | :tool | :context | :budget | :protocol | :cancelled | :internal
 
   @typedoc "Stable machine-readable terminal reason."
   @type reason ::
@@ -93,6 +93,7 @@ defmodule Synapse.Agent.Error do
           | :invalid_function_call_batch
           | :tool_admission_failed
           | :tool_ambiguous
+          | :token_limit_exceeded
           | :turn_budget_exhausted
           | :tool_call_budget_exhausted
           | :wall_time_budget_exhausted
@@ -154,7 +155,8 @@ defmodule Synapse.Agent.Error do
       is_binary(message) and byte_size(message) <= @max_message_bytes and
         String.valid?(message) and String.trim(message) != ""
 
-  defp valid_turn?(turn), do: is_integer(turn) and turn >= 0 and turn <= @max_turns
+  defp valid_turn?(turn),
+    do: is_integer(turn) and turn >= 0 and turn <= 9_223_372_036_854_775_807
 
   defp optional_operation_id?(nil), do: true
 
@@ -184,7 +186,7 @@ end
 
 defimpl Inspect, for: Synapse.Agent.Error do
   def inspect(%{kind: kind, reason: reason}, _options)
-      when kind in [:internal, :provider, :protocol, :tool, :budget, :cancelled] and
+      when kind in [:internal, :provider, :protocol, :tool, :context, :budget, :cancelled] and
              reason in [
                :invalid_run_request,
                :invalid_agent_context,
@@ -200,6 +202,7 @@ defimpl Inspect, for: Synapse.Agent.Error do
                :invalid_function_call_batch,
                :tool_admission_failed,
                :tool_ambiguous,
+               :token_limit_exceeded,
                :turn_budget_exhausted,
                :tool_call_budget_exhausted,
                :wall_time_budget_exhausted,

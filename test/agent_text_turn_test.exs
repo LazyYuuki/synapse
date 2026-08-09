@@ -85,6 +85,8 @@ defmodule Synapse.Agent.TextTurnTest do
     refute provider_id =~ "run-1"
     assert {:ok, longest_id} = OperationId.provider(String.duplicate("x", 256), 9_999, 9_999)
     assert byte_size(longest_id) <= 256
+    assert {:ok, id_after_old_ceiling} = OperationId.provider("run-1", 10_000, 10_000)
+    assert id_after_old_ceiling =~ "-t10000-a10000"
   end
 
   test "operation IDs reject invalid trusted inputs" do
@@ -93,11 +95,11 @@ defmodule Synapse.Agent.TextTurnTest do
                OperationId.provider(invalid, 1, 1)
     end
 
-    for {turn, attempt} <- [{0, 1}, {10_000, 1}, {1, 0}, {1, 10_000}] do
+    for {turn, attempt} <- [{0, 1}, {1, 0}, {9_223_372_036_854_775_808, 1}] do
       assert {:error, _reason} = OperationId.provider("run-1", turn, attempt)
     end
 
-    for {turn, ordinal} <- [{0, 1}, {10_000, 1}, {1, 0}, {1, 10_000}] do
+    for {turn, ordinal} <- [{0, 1}, {1, 0}, {1, 9_223_372_036_854_775_808}] do
       assert {:error, _reason} = OperationId.tool("run-1", turn, ordinal)
     end
   end
@@ -184,6 +186,28 @@ defmodule Synapse.Agent.TextTurnTest do
                     }}
 
     refute_receive {:run_event, _event}
+  end
+
+  test "rejects an oversized complete Provider request before starting the turn" do
+    test_pid = self()
+    run = run_request(String.duplicate("x", 816_000))
+
+    with_context(test_pid, Fake, fn context, workspace ->
+      assert {:error,
+              %Error{
+                kind: :context,
+                reason: :token_limit_exceeded,
+                turn: 0,
+                details: %{"maximum" => 272_000, "observed" => observed}
+              }} = Runner.run(run, context)
+
+      assert observed > 272_000
+      assert {:ok, 0} = WorkspaceFake.remaining_operations(workspace)
+    end)
+
+    assert_receive {:run_event, %RunStarted{}}
+    assert_receive {:run_event, %RunFailed{error: %Error{reason: :token_limit_exceeded}}}
+    refute_receive {:run_event, %TurnStarted{}}
   end
 
   test "Provider progress callbacks work from another process" do
@@ -327,27 +351,20 @@ defmodule Synapse.Agent.TextTurnTest do
     end
   end
 
-  test "normalizes Provider failures before and after output without retrying" do
-    for {label, provider_error, expected_reason, terminal_module, delta} <- [
+  test "normalizes non-retryable Provider failures without retrying" do
+    for {label, provider_error, expected_reason, terminal_module} <- [
           {"before", provider_error("run-before", :unavailable, false), :provider_failed,
-           RunFailed, nil},
+           RunFailed},
           {"timeout", provider_error("run-timeout", :timeout, false), :provider_failed,
-           RunInterrupted, nil},
-          {"after", provider_error("run-after", :interrupted, true),
-           :provider_interrupted_after_output, RunInterrupted, "partial"}
+           RunInterrupted}
         ] do
       test_pid = self()
       run = run_request("case #{label}", "run-#{label}")
       {:ok, operation_id} = OperationId.provider(run.id, 1, 1)
       provider_error = %{provider_error | operation_id: operation_id}
 
-      events =
-        if delta,
-          do: [%ProviderTextDelta{item_id: "partial", content_index: 0, delta: delta}],
-          else: []
-
       with_context(test_pid, Fake, fn context, workspace ->
-        Fake.with_script(operation_id, [{:turn, events, {:error, provider_error}}], fn ->
+        Fake.with_script(operation_id, [{:turn, [], {:error, provider_error}}], fn ->
           assert {:error, %Error{reason: ^expected_reason, operation_id: ^operation_id}} =
                    Runner.run(run, context)
 

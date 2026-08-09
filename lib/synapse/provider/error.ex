@@ -5,9 +5,8 @@ defmodule Synapse.Provider.Error do
   Provider implementations create errors; the Agent Loop or Runtime consumes
   them and decides whether policy permits another attempt. `retryable` describes
   the failure class, while `output_started` independently records whether the
-  user may already have observed model output. Keeping both prevents an
-  apparently safe retry from silently duplicating streamed text or tool-call
-  fragments.
+  user may already have observed model output. Keeping both lets higher-level
+  policy explicitly account for progress duplication when replaying a request.
 
   Fields contain normalized classifications and sanitized diagnostics only.
   Raw response bodies, authorization headers, credentials, and Req structs do

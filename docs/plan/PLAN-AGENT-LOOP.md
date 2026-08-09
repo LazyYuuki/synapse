@@ -200,16 +200,15 @@ import or call Agent.
   executable calls, and authoritative source order.
 - Every FunctionCall in a successful response is converted with
   `Tool.Call.from_provider/2` before the first call executes.
-- If any call cannot be admitted or the whole batch exceeds the remaining Tool
-  budget, none of that response's calls execute.
+- If any call cannot be structurally admitted, none of that response's calls execute.
 - Provider output-item `id` remains in conversation projection. Provider
   `call_id` pairs Tool Call and Tool Result. Agent-generated `operation_id`
   controls one external operation. These identities are never substituted.
 - Tool calls execute synchronously and sequentially in Provider source order.
 - An ordinary Tool `:error` is paired, appended, and made available to the model
   for correction.
-- A Tool `:ambiguous` result is paired locally, prevents every later call in the
-  batch, prevents another Provider request, and terminates the run.
+- A Tool `:ambiguous` result is paired, retained with the complete batch, and
+  projected into the next Provider request for inspection and user reporting.
 - Agent never parses `Tool.Result.content` to make policy decisions. It uses the
   typed `status` and trusted local fields.
 - Every executed Tool Call has exactly one Result with the same `call_id`.
@@ -286,46 +285,21 @@ current Provider event pattern.
 
 ## Public Contracts
 
-### Budget
+### Continuation Policy
 
-```elixir
-%Synapse.Budget{
-  max_turns: 20,
-  max_tool_calls: 50,
-  max_wall_time_ms: 900_000,
-  provider_inactivity_ms: 120_000,
-  tool_inactivity_ms: 180_000,
-  max_output_bytes: 524_288,
-  max_provider_retries: 2
-}
-```
+Agent turns, Tool calls, Provider retries, and aggregate output are counted but do
+not terminate a run. Before every Provider operation, Synapse estimates the exact
+complete request and rejects transport above the 272,000-token context ceiling.
 
-Budget is trusted local policy. It is validated once before a run and copied into
-immutable State. `max_output_bytes` bounds aggregate model-visible bytes newly
-added during the run: completed assistant message text, canonical FunctionCall
-arguments, and Tool Result content. Existing user prompt bytes are bounded by the
-Run Request contract separately.
+After 20, 40, 60, and every later multiple of 20 completed turns, the next
+Provider request receives transient trusted guidance to assess whether work is
+making concrete progress. A stuck model should return final text asking the user
+for specific help; a model with a justified next step may continue using Tools.
+The checkpoint is top-level Provider instruction, not user conversation history.
 
-Provider and Tool retain their own lower-level hard ceilings. Agent Budget may
-lower effective inactivity or output policy but cannot enlarge those component
-limits.
-
-The loopback WebSocket API exposes at most 524,288 aggregate bytes even though the
-core Budget type retains a 4,194,304-byte trusted-caller ceiling. Larger core
-Budgets require a caller whose transport, retained state, and Provider request
-limits are sized for them.
-
-Initial hard Budget ceilings:
-
-| Field | Valid range | Hard ceiling rationale |
-| --- | ---: | --- |
-| `max_turns` | 1..100 | Bounds recursive model continuation |
-| `max_tool_calls` | 1..500 | Bounds side effects and conversation growth |
-| `max_wall_time_ms` | 1..3,600,000 | One hour maximum run lifetime |
-| `provider_inactivity_ms` | 1..900,000 | Matches Provider StreamContext ceiling |
-| `tool_inactivity_ms` | 1..900,000 | Matches Tool/Workspace process ceiling |
-| `max_output_bytes` | 1..4,194,304 | Leaves headroom below Provider's 8 MiB encoded request ceiling |
-| `max_provider_retries` | 0..5 | Allows retry disablement and prevents infrastructure loops |
+Runtime deadlines are explicit and default to `:infinity`. Provider inactivity
+belongs to Provider transport. Bash timeout, inactivity, and output limits belong
+to Tool and Workspace policy.
 
 ### Run Request
 
@@ -707,26 +681,24 @@ validate Request and Context
 | Event sink failure before Tool start | None | No | Internal failure |
 | Event sink failure after known Tool result | Stop later calls | No | Internal failure with known Tool outcome |
 
-## Budget And Accounting Rules
+## Context And Accounting Rules
 
-| Resource | Default | Accounting point |
+| Resource | Policy | Accounting point |
 | --- | ---: | --- |
-| Logical turns | 20 | Increment once before first attempt of an immutable turn request |
-| Tool calls | 50 | Admit the whole response batch before first execution; increment per execution |
-| Wall time | 900,000 ms | Effective absolute deadline is the earlier of Budget and Runtime deadline |
-| Provider inactivity | 120,000 ms | Passed to each Provider StreamContext |
-| Tool inactivity | 180,000 ms | Lowers effective Tool/Workspace process policy where applicable |
-| Added output | 64,000 bytes | Completed assistant text, canonical call arguments, and Tool Result content |
-| Provider retries | 2 | Increment only for an additional attempt, not the initial attempt |
+| Provider input | 272,000 estimated tokens | Check the complete immutable request before every call |
+| Logical turns | Unbounded | Increment once before first attempt of an immutable turn request |
+| Tool calls | Unbounded | Increment immediately before each execution |
+| Added output | Unbounded aggregate | Count completed assistant text, call arguments, and Tool Result content |
+| Provider retries | Unbounded | Increment only for an additional safe pre-output attempt |
+| Bash execution | Tool policy | Enforce timeout, inactivity, and output in Tool/Workspace layers |
 
 Rules:
 
 - Use monotonic time for elapsed and deadline calculations.
-- Check cancellation, wall time, and remaining budget before every Provider
+- Check cancellation and any explicit Runtime deadline before every Provider
   attempt, retry wait, and Tool execution.
-- Turn budget is charged once per logical request, not once per safe retry.
-- Tool-call budget preflights the complete batch. Do not execute a prefix when the
-  remaining budget cannot pair the entire batch.
+- Check estimated input tokens before every immutable Provider request.
+- Structurally preflight a complete Tool-call batch before executing its first call.
 - Output accounting uses complete normalized terminal values, not streaming-event
   fragment sizes. Provider retains its own per-stream hard output limit.
 - Count FunctionCall arguments using canonical JSON bytes including keys,
@@ -1153,8 +1125,8 @@ Workspace, and Tool System Phases 0-10.
 - [x] ToolCompleted excludes Result content and arguments.
 - [x] Invalid trusted Tool Context executes no Workspace operation.
 - [x] Executor admission mismatch terminates defensively.
-- [x] Ambiguous Write stops later Bash.
-- [x] Ambiguous Bash stops later Read.
+- [x] Ambiguous Write remains paired model feedback and later Bash may run.
+- [x] Ambiguous Bash remains paired model feedback and later Read may run.
 - [x] Event sink failure before ToolStarted executes nothing.
 - [x] Event sink failure after a known Result starts no later Tool.
 - [x] Fake Workspace reports exact remaining operations after every stop case.

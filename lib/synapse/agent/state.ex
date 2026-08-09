@@ -3,12 +3,11 @@ defmodule Synapse.Agent.State do
   Immutable in-memory state owned by the process executing Agent Runner.
 
   State contains the validated Run Request, ordered normalized Provider input,
-  aggregate counters, monotonic start/deadline values, and one terminal status.
+  aggregate accounting counters, monotonic start/deadline values, and one terminal status.
   Provider event callbacks may emit observations but never mutate State.
 
   Projection constructs initial `:running` state with zero counters. State computes
-  the effective absolute deadline as the earlier of checked `started_at +
-  Budget.max_wall_time_ms` and Runtime's supplied `deadline`. Pure transition
+  the effective absolute deadline from Runtime's supplied `deadline`. Pure transition
   functions accept supplied monotonic timestamps, use checked signed 64-bit
   arithmetic, and return new values only at explicit operation boundaries.
 
@@ -67,10 +66,6 @@ defmodule Synapse.Agent.State do
           :invalid_state
           | :invalid_timestamp
           | :counter_overflow
-          | :turn_budget_exhausted
-          | :tool_call_budget_exhausted
-          | :provider_retry_budget_exhausted
-          | :output_budget_exhausted
           | :wall_time_budget_exhausted
 
   @doc "Constructs initial running State with zero counters and validated input."
@@ -82,12 +77,10 @@ defmodule Synapse.Agent.State do
          true <-
            Validation.int64?(attrs[:started_at]) or
              {:error, {:started_at, :must_be_monotonic_time}},
-         runtime_deadline <- attrs[:deadline],
+         deadline <- attrs[:deadline],
          true <-
-           runtime_deadline == :infinity or Validation.int64?(runtime_deadline) or
-             {:error, {:deadline, :must_be_monotonic_time_or_infinity}},
-         {:ok, budget_deadline} <- checked_deadline(attrs.started_at, run.budget.max_wall_time_ms),
-         deadline <- earlier_deadline(budget_deadline, runtime_deadline) do
+           deadline == :infinity or Validation.int64?(deadline) or
+             {:error, {:deadline, :must_be_monotonic_time_or_infinity}} do
       {:ok,
        %__MODULE__{
          run: run,
@@ -108,9 +101,7 @@ defmodule Synapse.Agent.State do
   def admit_turn(state, now) do
     with :ok <- valid_transition(state, now),
          :ok <- before_deadline(state, now),
-         {:ok, turn} <- checked_increment(state.turn),
-         true <-
-           turn <= state.run.budget.max_turns or {:error, :turn_budget_exhausted} do
+         {:ok, turn} <- checked_increment(state.turn) do
       {:ok, %{state | turn: turn}}
     end
   end
@@ -120,10 +111,7 @@ defmodule Synapse.Agent.State do
   def admit_tool(state, now) do
     with :ok <- valid_transition(state, now),
          :ok <- before_deadline(state, now),
-         {:ok, tool_calls} <- checked_increment(state.tool_calls),
-         true <-
-           tool_calls <= state.run.budget.max_tool_calls or
-             {:error, :tool_call_budget_exhausted} do
+         {:ok, tool_calls} <- checked_increment(state.tool_calls) do
       {:ok, %{state | tool_calls: tool_calls}}
     end
   end
@@ -133,10 +121,7 @@ defmodule Synapse.Agent.State do
   def admit_provider_retry(state, now) do
     with :ok <- valid_transition(state, now),
          :ok <- before_deadline(state, now),
-         {:ok, retries} <- checked_increment(state.provider_retries),
-         true <-
-           retries <= state.run.budget.max_provider_retries or
-             {:error, :provider_retry_budget_exhausted} do
+         {:ok, retries} <- checked_increment(state.provider_retries) do
       {:ok, %{state | provider_retries: retries}}
     end
   end
@@ -147,10 +132,7 @@ defmodule Synapse.Agent.State do
     with :ok <- valid_state(state),
          true <-
            (is_integer(bytes) and bytes >= 0) or {:error, :counter_overflow},
-         {:ok, output_bytes} <- checked_add(state.output_bytes, bytes),
-         true <-
-           output_bytes <= state.run.budget.max_output_bytes or
-             {:error, :output_budget_exhausted} do
+         {:ok, output_bytes} <- checked_add(state.output_bytes, bytes) do
       {:ok, %{state | output_bytes: output_bytes}}
     end
   end
@@ -189,7 +171,7 @@ defmodule Synapse.Agent.State do
   defp valid_state(%__MODULE__{status: :running} = state) do
     if Request.valid?(state.run) and valid_input_state?(state) and valid_counters?(state) and
          Validation.int64?(state.started_at) and
-         Validation.int64?(state.deadline),
+         (state.deadline == :infinity or Validation.int64?(state.deadline)),
        do: :ok,
        else: {:error, :invalid_state}
   end
@@ -200,14 +182,13 @@ defmodule Synapse.Agent.State do
     do: match?({:ok, _input_items}, normalize_input(state.input_items, state.run.model))
 
   defp valid_counters?(state) do
-    counter?(state.turn, state.run.budget.max_turns) and
-      counter?(state.tool_calls, state.run.budget.max_tool_calls) and
-      counter?(state.provider_retries, state.run.budget.max_provider_retries) and
-      counter?(state.output_bytes, state.run.budget.max_output_bytes)
+    counter?(state.turn) and counter?(state.tool_calls) and counter?(state.provider_retries) and
+      counter?(state.output_bytes)
   end
 
-  defp counter?(value, maximum),
-    do: is_integer(value) and value >= 0 and value <= maximum and Validation.int64?(value)
+  defp counter?(value), do: is_integer(value) and value >= 0 and Validation.int64?(value)
+
+  defp before_deadline(%{deadline: :infinity}, _now), do: :ok
 
   defp before_deadline(state, now) do
     if now < state.deadline,
@@ -222,18 +203,6 @@ defmodule Synapse.Agent.State do
 
     if Validation.int64?(value), do: {:ok, value}, else: {:error, :counter_overflow}
   end
-
-  defp checked_deadline(started_at, duration) do
-    case checked_add(started_at, duration) do
-      {:ok, deadline} -> {:ok, deadline}
-      {:error, :counter_overflow} -> {:error, {:deadline, :wall_time_addition_overflow}}
-    end
-  end
-
-  defp earlier_deadline(budget_deadline, :infinity), do: budget_deadline
-
-  defp earlier_deadline(budget_deadline, runtime_deadline),
-    do: min(budget_deadline, runtime_deadline)
 end
 
 defimpl Inspect, for: Synapse.Agent.State do

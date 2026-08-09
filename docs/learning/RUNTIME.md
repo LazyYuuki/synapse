@@ -203,16 +203,14 @@ These policies are intentionally distinct:
 
 | Policy | Owner | Effect |
 | --- | --- | --- |
-| Run Budget wall time | Agent State | Aggregate monotonic run boundary |
-| Optional Runtime deadline | Runtime Options / Agent State | Earlier absolute monotonic boundary |
+| Optional Runtime deadline | Runtime Options / Agent State | Explicit absolute monotonic boundary; defaults to infinity |
 | Provider inactivity | Provider | Bounds silence meaningful to transport streaming |
 | Process inactivity | Workspace | Bounds accepted-output silence |
 | Process timeout | Workspace | Bounds one command regardless of activity |
 | Await timeout | Run owner | Stops only the current receive and restores await right |
 | Supervisor shutdown | OTP ownership tree | Terminates owners; no terminal-event guarantee |
 
-Agent selects the earlier of `started_at + Budget.max_wall_time_ms` and Runtime's
-optional deadline, then passes that effective value to Provider and Tool/Workspace
+Agent passes Runtime's optional deadline directly to Provider and Tool/Workspace
 contexts. Runtime creates no competing operation watchdog. Process existence alone
 is not meaningful activity.
 

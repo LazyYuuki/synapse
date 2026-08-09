@@ -716,7 +716,7 @@ Bash admitted
 
 Every generic Bash command declares `mutation: :unknown`; shell text cannot be
 proved read-only. It therefore holds the exclusive Workspace mutation permit.
-Cancellation, timeout, inactivity, output limit, sink failure, runner failure, or
+Cancellation, timeout, inactivity, sink failure, runner failure, or
 owner death after start remains ambiguous. Executor never retries Bash.
 
 This is same-user execution, not a sandbox. A command may read any host file the
@@ -730,8 +730,9 @@ and no provider keys, cloud credentials, GitHub token, SSH agent socket, or gene
 secret injection. That reduces accidental inheritance; it cannot stop shell source
 from deliberately reading same-user files or invoking another credential source.
 
-Workspace bounds raw accepted output before Tool sees it. `output_bytes` counts raw
-bytes and `truncated` reports Workspace output-limit clipping. Tool then repairs
+Workspace retains a bounded raw prefix before Tool sees it while acknowledging and
+discarding excess bytes without stopping Bash. `output_bytes` counts the bounded
+observed amount and `truncated` reports retained-output clipping. Tool then repairs
 invalid UTF-8, JSON-escapes controls, and clips the model-visible prefix to its
 result budget; `presentation_truncated` reports this second layer. Repair and
 escaping can expand bytes, so the visible prefix can be shorter even when Workspace

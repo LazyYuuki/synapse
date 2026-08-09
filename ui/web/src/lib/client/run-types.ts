@@ -71,6 +71,8 @@ export type RunState = {
   traceIncomplete: boolean;
   traceBaseText: string;
   historyReset: boolean;
+  turnStartedAt: number | null;
+  lastTurnDurationMs: number | null;
   knowledge: ReductionKnowledge;
 };
 

@@ -314,21 +314,16 @@ defmodule Synapse.API.PendingTerminal do
 
   defp result_within_policy?(result, config) do
     Cancel.valid_run_id?(result.run_id, config) and
-      byte_size(result.text) <= config.budget.max_output_bytes and
-      result.turns <= config.budget.max_turns and
-      result.tool_calls <= config.budget.max_tool_calls and
-      result.provider_retries <= config.budget.max_provider_retries and
-      result.output_bytes <= config.budget.max_output_bytes
+      byte_size(result.text) <= config.max_projection_text_bytes and positive_int64?(result.turns) and
+      counter?(result.tool_calls) and counter?(result.provider_retries) and
+      counter?(result.output_bytes)
   end
 
   defp valid_result?(result, config) when is_map(result) and not is_struct(result) do
     Map.keys(result) |> Enum.sort() == Enum.sort(@result_fields) and
-      Validation.bounded_non_empty_string?(result[:text], config.budget.max_output_bytes) and
-      positive_int64?(result[:turns]) and result.turns <= config.budget.max_turns and
-      counter?(result[:tool_calls]) and result.tool_calls <= config.budget.max_tool_calls and
-      counter?(result[:provider_retries]) and
-      result.provider_retries <= config.budget.max_provider_retries and
-      counter?(result[:output_bytes]) and result.output_bytes <= config.budget.max_output_bytes and
+      Validation.bounded_non_empty_string?(result[:text], config.max_projection_text_bytes) and
+      positive_int64?(result[:turns]) and counter?(result[:tool_calls]) and
+      counter?(result[:provider_retries]) and counter?(result[:output_bytes]) and
       result.output_bytes >= byte_size(result.text)
   end
 

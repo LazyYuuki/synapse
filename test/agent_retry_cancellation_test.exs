@@ -92,35 +92,66 @@ defmodule Synapse.Agent.RetryCancellationTest do
     assert_receive {:retry_delay, 2}
   end
 
-  test "retry exhaustion returns the final safe Provider classification" do
+  test "interrupted request recovers on the tenth retry despite partial output" do
     run = run_request(max_provider_retries: 2)
-    operation_ids = provider_ids(run, 3)
+    operation_ids = provider_ids(run, 11)
 
     script =
-      Enum.with_index(operation_ids, 1)
+      operation_ids
+      |> Enum.take(10)
+      |> Enum.with_index(1)
       |> Enum.map(fn {operation_id, index} ->
-        {:turn, [],
-         {:error, provider_error(operation_id, :transport, true, false, "failure #{index}")}}
-      end)
+        progress = %TextDelta{
+          item_id: "message-partial-#{index}",
+          content_index: 0,
+          delta: "partial #{index}"
+        }
 
-    assert {{:error, error}, [0, 0, 0], events} =
+        {:turn, [progress],
+         {:error, provider_error(operation_id, :interrupted, false, true, "failure #{index}")}}
+      end)
+      |> Kernel.++([
+        {:turn, [], {:ok, text_response("response-after-retries", "Recovered")}}
+      ])
+
+    assert {{:ok, result}, remaining, events} =
              run_provider(run, operation_ids, fn _context -> script end,
                retry_delay: fn _ -> 0 end
              )
 
+    assert remaining == List.duplicate(0, 11)
+    assert result.provider_retries == 10
+    assert result.text == "Recovered"
+    assert Enum.count(events, &match?(%Event.TextDelta{}, &1)) == 10
+    assert Enum.any?(events, &match?(%Event.RunCompleted{}, &1))
+  end
+
+  test "eleventh transient failure exhausts the ten-retry request limit" do
+    run = run_request()
+    operation_ids = provider_ids(run, 11)
+
+    script =
+      Enum.map(operation_ids, fn operation_id ->
+        {:turn, [], {:error, provider_error(operation_id, :interrupted, false, true)}}
+      end)
+
+    assert {{:error, error}, remaining, events} =
+             run_provider(run, operation_ids, fn _context -> script end,
+               retry_delay: fn _ -> 0 end
+             )
+
+    assert remaining == List.duplicate(0, 11)
+
     assert %AgentError{
              kind: :provider,
              reason: :provider_retry_exhausted,
-             details: %{
-               "provider_kind" => "transport",
-               "retryable" => true,
-               "output_started" => false,
-               "attempts" => 3
-             }
+             details: %{"attempts" => 11, "provider_kind" => "interrupted"}
            } = error
 
-    assert Enum.any?(events, &match?(%Event.RunFailed{}, &1))
-    refute Enum.any?(events, &match?(%Event.RunInterrupted{}, &1))
+    assert [%Event.TurnCompleted{provider_attempts: 11}] =
+             Enum.filter(events, &match?(%Event.TurnCompleted{}, &1))
+
+    assert Enum.any?(events, &match?(%Event.RunInterrupted{}, &1))
   end
 
   test "cancellation during retry wait starts no second attempt" do
@@ -171,7 +202,6 @@ defmodule Synapse.Agent.RetryCancellationTest do
           {:authentication, true},
           {:authorization, true},
           {:protocol, true},
-          {:interrupted, true},
           {:transport, false}
         ] do
       run = run_request(max_provider_retries: 2)
@@ -185,7 +215,7 @@ defmodule Synapse.Agent.RetryCancellationTest do
     end
   end
 
-  test "TextDelta and ToolCall progress make retryable failures terminal and execute nothing" do
+  test "TextDelta and ToolCall progress allow transient recovery and execute nothing" do
     for {_label, progress} <- [
           {"text", %TextDelta{item_id: "message-partial", content_index: 0, delta: "partial"}},
           {"tool",
@@ -196,8 +226,9 @@ defmodule Synapse.Agent.RetryCancellationTest do
            }}
         ] do
       run = run_request(max_provider_retries: 2)
-      [operation_id] = provider_ids(run, 1)
-      provider_error = provider_error(operation_id, :transport, true, true)
+      operation_ids = provider_ids(run, 2)
+      provider_error = provider_error(Enum.at(operation_ids, 0), :transport, true, true)
+      response = text_response("response-after-progress", "Recovered")
       {:ok, workspace} = Workspace.Fake.open([])
 
       try do
@@ -209,11 +240,15 @@ defmodule Synapse.Agent.RetryCancellationTest do
           )
 
         Synapse.Provider.Fake.with_script(
-          operation_id,
-          [{:turn, [progress], {:error, provider_error}}],
+          operation_ids,
+          [
+            {:turn, [progress], {:error, provider_error}},
+            {:turn, [], {:ok, response}}
+          ],
           fn ->
-            assert {:error, %AgentError{reason: :provider_interrupted_after_output}} =
-                     Runner.run(run, context)
+            assert {:ok, result} = Runner.run(run, context)
+            assert result.text == "Recovered"
+            assert result.provider_retries == 1
 
             assert {:ok, 0} = Workspace.Fake.remaining_operations(workspace)
           end

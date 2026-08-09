@@ -231,8 +231,9 @@ the tool. A later stream failure would invalidate the turn.
 - `output_started`: could replay duplicate output already observed by a caller?
 
 These fields are independent. Cancellation can happen before output, producing
-an interruption with `output_started: false`. A normally retryable transport
-class after output cannot be replayed transparently.
+an interruption with `output_started: false`. After-output replay may duplicate
+progress already observed by a caller, so the Agent policy must make that tradeoff
+explicit and still wait for a complete Response before executing any Tool.
 
 ### StreamContext
 
@@ -976,8 +977,8 @@ Try answering these before reading the answer guide:
    single authoritative terminal result.
 5. A temporary worker owns Req and parser state; the calling operation process
    coordinates and monitors that worker.
-6. It prevents a higher layer from invisibly retrying and duplicating text or
-   tool calls already observed by a consumer.
+6. It tells a higher layer whether retrying may duplicate progress already observed
+   by a consumer, so replay can be an explicit policy decision.
 7. Provider knows failure details, but Agent/Runtime owns run policy, budgets,
    and whether a fresh attempt is appropriate.
 8. Use Fake for upper-component Provider behavior. Use an injected Req adapter

@@ -533,25 +533,14 @@ terminal, and subscription wakeup output use `null` unless they are the immediat
   "conversation": [
     {"role": "user", "content": "Earlier request"},
     {"role": "assistant", "content": "Earlier answer"}
-  ],
-  "budget": {
-    "max_turns": 10,
-    "max_tool_calls": 20,
-    "max_wall_time_ms": 600000,
-    "provider_inactivity_ms": 90000,
-    "tool_inactivity_ms": 120000,
-    "max_output_bytes": 524288,
-    "max_provider_retries": 1
-  }
+  ]
 }
 ```
 
-`prompt` and absolute `cwd` are required. `model`, `budget`, and `conversation` are optional.
+`prompt` and absolute `cwd` are required. `model` and `conversation` are optional.
 Conversation is a complete alternating sequence beginning with user and ending with
 assistant. It is bounded to 128 messages and 1,572,864 aggregate UTF-8 content bytes.
-Budget may contain any subset of the seven exact fields. Every supplied value
-must be an integer in the Budget contract and less than or equal to server
-policy. Unknown fields are rejected. The payload cannot contain `run_id`,
+The payload cannot contain `budget`, `run_id`,
 capabilities, credentials, Provider selection, instructions, Tool limits,
 Workspace limits, callbacks, or Runtime options.
 

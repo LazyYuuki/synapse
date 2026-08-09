@@ -57,15 +57,15 @@ defmodule Synapse.Runtime.DeadlineTest do
     assert_settled(run)
   end
 
-  test "the effective Provider deadline is the earlier Runtime or Budget boundary" do
+  test "the Provider deadline is owned only by Runtime" do
     now = System.monotonic_time(:millisecond)
 
     scenarios = [
-      {"runtime-earlier", 60_000, now + 5_000, :exact_runtime},
-      {"budget-earlier", 5_000, now + 60_000, :budget_before_runtime}
+      {"runtime-earlier", 60_000, now + 5_000},
+      {"former-budget-earlier", 5_000, now + 60_000}
     ]
 
-    Enum.each(scenarios, fn {label, wall_time_ms, runtime_deadline, expectation} ->
+    Enum.each(scenarios, fn {label, wall_time_ms, runtime_deadline} ->
       request = run_request("runtime-deadline-#{label}", max_wall_time_ms: wall_time_ms)
       configure_provider(request, label, :success)
 
@@ -75,12 +75,8 @@ defmodule Synapse.Runtime.DeadlineTest do
       assert_receive {:deadline_provider_called, ^label, task, context}
       assert task == run.task
 
-      case expectation do
-        :exact_runtime -> assert context.deadline == runtime_deadline
-        :budget_before_runtime -> assert context.deadline < runtime_deadline
-      end
-
-      assert context.inactivity_ms == request.budget.provider_inactivity_ms
+      assert context.deadline == runtime_deadline
+      assert context.inactivity_ms == 120_000
       assert {:ok, %Result{run_id: run_id}} = Runtime.await(run, :infinity)
       assert run_id == request.id
       assert_settled(run)
@@ -96,7 +92,7 @@ defmodule Synapse.Runtime.DeadlineTest do
     register_cleanup(run)
     assert_receive {:deadline_provider_called, ^label, task, context}
     assert task == run.task
-    assert context.inactivity_ms == 37
+    assert context.inactivity_ms == 120_000
 
     assert {:error, %Error{kind: :provider, reason: :provider_failed} = error} =
              Runtime.await(run, :infinity)

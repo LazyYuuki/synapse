@@ -125,7 +125,6 @@ function commandDisplay(command: ClientCommand): JsonObject {
         cwd: { omitted: true, utf8_bytes: utf8ByteLength(command.payload.cwd) },
       };
       if (command.payload.model !== undefined) payload.model = command.payload.model;
-      if (command.payload.budget !== undefined) payload.budget = { ...command.payload.budget };
       break;
     case 'run.cancel':
       payload = { run_id: command.payload.run_id };

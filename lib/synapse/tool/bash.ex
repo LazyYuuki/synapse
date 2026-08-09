@@ -4,15 +4,16 @@ defmodule Synapse.Tool.Bash do
 
   Bash accepts shell source and a nullable lowered total timeout. Preparation
   revalidates the complete Call, normalizes a null timeout to trusted policy, and
-  fixes `/bin/bash -lc`, workspace cwd, inactivity/output limits, and unknown
+  fixes `/bin/bash -lc`, workspace cwd, inactivity and retained-output policy, and unknown
   mutation footprint in one `Workspace.ProcessSpec`. The adapter receives no
   Handle and starts no process; Executor's static Dispatcher alone calls Workspace
   with an exec-only OperationContext and a synchronous payload-discarding event
   sink. Same-user execution is not a sandbox.
 
   Natural exit zero is success and natural non-zero exit is a known completed
-  error. Cancellation or another forced stop after start is ambiguous because the
-  command may have mutated state. Executor never retries Bash. See
+  error. Output beyond the retained prefix is discarded while Bash continues and
+  is reported as truncation. Cancellation or another forced stop after start is
+  ambiguous because the command may have mutated state. Executor never retries Bash. See
   `docs/learning/TOOL-SYSTEM.md`.
   """
 
