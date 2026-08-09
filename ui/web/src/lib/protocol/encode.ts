@@ -2,9 +2,8 @@
  * @see ../../../../../docs/plan/PLAN-API.md
  */
 
-import { BUDGET_LIMITS, LIMITS, PROTOCOL_VERSION } from './constants';
+import { LIMITS, PROTOCOL_VERSION } from './constants';
 import type {
-  Budget,
   CancelCommand,
   ClientCommand,
   ConversationMessage,
@@ -17,7 +16,6 @@ import {
   hasExactKeys,
   isBoundedString,
   isIdentifier,
-  isPlainObject,
   isRunId,
   utf8ByteLength,
 } from './validation';
@@ -27,7 +25,6 @@ export type EncodeErrorCode =
   | 'invalid_prompt'
   | 'invalid_workspace_path'
   | 'invalid_model'
-  | 'invalid_budget'
   | 'invalid_conversation'
   | 'invalid_run_id'
   | 'invalid_cursor'
@@ -46,7 +43,6 @@ export type StartCommandInput = {
   prompt: string;
   cwd: string;
   model?: string;
-  budget?: Partial<Budget>;
   conversation?: ConversationMessage[];
 };
 
@@ -55,7 +51,6 @@ const messages = {
   invalid_prompt: 'Prompt must contain text and fit the protocol byte limit.',
   invalid_workspace_path: 'Workspace path must be an absolute bounded path without NUL.',
   invalid_model: 'Model must be blank or a bounded printable identifier.',
-  invalid_budget: 'Budget must contain only safe integers within protocol limits.',
   invalid_conversation: 'Conversation must contain bounded, complete user/assistant pairs.',
   invalid_run_id: 'Run ID must use the canonical protocol-v1 format.',
   invalid_cursor: 'Run cursor must be a non-negative safe integer.',
@@ -89,9 +84,6 @@ export function encodeStartCommand(input: StartCommandInput): EncodeResult<Start
     }
   }
 
-  const budget = encodeBudget(input.budget);
-  if (budget === false) return failure('invalid_budget');
-
   const conversation = encodeConversation(input.conversation);
   if (conversation === false) return failure('invalid_conversation');
 
@@ -100,7 +92,6 @@ export function encodeStartCommand(input: StartCommandInput): EncodeResult<Start
     cwd: input.cwd,
   };
   if (model !== undefined) payload.model = model;
-  if (budget !== undefined) payload.budget = budget;
   if (conversation !== undefined) payload.conversation = conversation;
 
   const command: StartCommand = {
@@ -188,27 +179,6 @@ export function encodePingCommand(requestId: string): EncodeResult<PingCommand> 
     request_id: requestId,
     payload: {},
   });
-}
-
-function encodeBudget(input: Partial<Budget> | undefined): Partial<Budget> | undefined | false {
-  if (input === undefined) return undefined;
-  if (!isPlainObject(input)) return false;
-
-  const allowed = Object.keys(BUDGET_LIMITS) as (keyof Budget)[];
-  if (Object.keys(input).some((field) => !allowed.includes(field as keyof Budget))) return false;
-
-  const budget: Partial<Budget> = {};
-  for (const field of allowed) {
-    if (!Object.hasOwn(input, field)) continue;
-    const value = input[field];
-    if (value === undefined) continue;
-
-    const limits = BUDGET_LIMITS[field];
-    if (!Number.isSafeInteger(value) || value < limits.min || value > limits.max) return false;
-    budget[field] = value;
-  }
-
-  return Object.keys(budget).length === 0 ? undefined : budget;
 }
 
 function finalize<TCommand extends ClientCommand>(command: TCommand): EncodeResult<TCommand> {

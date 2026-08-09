@@ -413,7 +413,7 @@ defmodule Synapse.Workspace.ContractsTest do
                  elapsed_ms: 10
                )
 
-      assert {:error, {:truncated, :must_match_output}} =
+      assert {:ok, %ProcessResult{termination: :exited, truncated: true}} =
                ProcessResult.new(
                  operation_id: "run-1",
                  termination: :exited,

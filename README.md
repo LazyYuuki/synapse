@@ -8,90 +8,56 @@ The goal is not an agent that never fails. The goal is an agent where failure is
 
 ## Status
 
-Synapse is currently in the architecture and prototyping stage. Provider streaming
-and Workspace Phases 0-10 are implemented, including canonical APFS paths, bounded
-revisioned reads, atomic writes and exact edits, plus bounded project commands
-with isolated runtime directories, a minimal environment, streaming output,
-mutation permits, matching cancellation, independent inactivity and absolute
-deadlines, direct-child cleanup, and a deterministic scripted Fake backend for
-side-effect-free Tool tests. Tool System Phases 0-10 have fixed and live-verified
-the four MVP function schemas, added bounded contracts and a static registry,
-implemented one-call capability dispatch and deterministic presentation, and made
-bounded revisioned Read, revision-checked Write, exact-one literal Edit, and
-bounded unknown-footprint Bash executable. Deterministic Provider-to-Tool
-integration, continuation pairing, live four-schema acceptance, and the final
-reliability, security, and ExDoc review are complete in
-[`docs/plan/PLAN-TOOL-SYSTEM.md`](docs/plan/PLAN-TOOL-SYSTEM.md). This document
-describes both current behavior and intended constraints. Agent Loop Phases 0-10
-have fixed the MVP turn, continuation, retry, cancellation, budget, event, and
-identity decisions; made one Fake Provider script consumable through distinct
-per-attempt operation IDs; and implemented validated Budget, Run Request/Event,
-Agent Context/State/Result/Error and inspection contracts plus pure full-history
-projection, immutable Provider Request construction, deterministic bounded
-operation IDs, one synchronous Provider turn with ordered Run Events, pure
-whole-batch FunctionCall admission with call/output budget preflight, and
-source-ordered sequential Tool execution with terminal ambiguity handling, and
-immutable full-history Tool-result continuation through final text, with checked
-aggregate budget and monotonic deadline enforcement, bounded exact-request
-Provider retries, interruption safety, persistent cancellation policy, and
-deterministic, temporary Real Workspace, and opt-in live Tokamak acceptance. The
-implementation gates are recorded in
-[`docs/plan/PLAN-AGENT-LOOP.md`](docs/plan/PLAN-AGENT-LOOP.md); maintenance guidance
-is in [`docs/learning/AGENT-LOOP.md`](docs/learning/AGENT-LOOP.md). Runtime Phases
-0-10 are complete and have fixed the one-active-run MVP topology, temporary RunServer and linked
-Agent Task ownership, synchronous Workspace readiness, start/cancel/await API,
-persistent cancellation, terminal cleanup gate, and conservative crash
-precedence; and implemented validated Runtime options, opaque Run authority,
-sanitized Runtime errors, bounded RunServer state/messages, atomics state
-contracts, Runtime-owned Agent failure reasons, the exact permanent infrastructure
-tree, one temporary linked and monitored Agent task, singleton Runtime admission,
-and supervised temporary real Workspace owners. Public accepted-run startup
-now validates trusted options, returns an opaque handle after `ready -> accept`,
-and runs Agent exactly once with task-owned Workspace authority. Owner-only await,
-Workspace-gated terminal publication, Runtime-loss reporting, timeout restoration,
-event/result agreement, at-most-once sink invocation, and idempotent persistent
-cancellation propagation through Provider and Tool operations are implemented.
-Caught and monitor-only Agent failures now become sanitized terminals using exact
-Workspace-close, buffered-terminal, cancellation, Tool-ambiguity, visible-output,
-and ordinary-crash precedence without replaying work. Aggregate monotonic deadlines,
-Provider and Tool inactivity ownership, and reverse-order application shutdown now
-propagate through existing Agent, Tokamak, and Workspace contracts without a competing
-Runtime operation timer. Public Runtime acceptance now completes an exact
-side-effect-free Fake `read -> write -> bash -> final text` loop and verifies and
-cancels bounded commands in synthetic temporary Real Workspaces with independent
-file, process, and owner-cleanup evidence. Repeated race, stale-authority,
-high-volume event, unavailable-supervisor, malformed-close, active-shutdown, and
-secret-retention audits now harden that lifecycle without adding replay or global
-run state. The implementation gates are recorded in
-[`docs/plan/PLAN-RUNTIME.md`](docs/plan/PLAN-RUNTIME.md); process ownership,
-maintenance, debugging, and deferred architecture are explained in
-[`docs/learning/RUNTIME.md`](docs/learning/RUNTIME.md).
+Synapse is currently in the architecture and prototyping stage. The following MVP
+components are implemented:
 
-Local WebSocket API Phases 0-10 are complete. `mix synapse.server` adds a
-loopback-only protocol-v1 endpoint with one active run, disconnect-safe execution,
-bounded process-lifetime snapshots/replay, explicit stale-cursor reset, and a
-trusted local-host boundary without authentication. It serves no frontend and accepts no credentials, capability
-grants, Provider selection, callbacks, handles, or Runtime options. The detailed
-contract is in [`docs/plan/PLAN-API.md`](docs/plan/PLAN-API.md); the protocol,
-ownership, failure, security, and maintenance guide is
-[`docs/learning/API.md`](docs/learning/API.md).
+- **Provider streaming** — Provider-neutral streaming with deterministic Fake-backed
+  tests and opt-in live Tokamak acceptance. See the
+  [provider plan](docs/plan/PLAN-PROVIDER.md) and
+  [maintenance guide](docs/learning/PROVIDER.md).
+- **Workspace** — Phases 0–10 are complete, including canonical paths, bounded
+  revisioned reads, atomic writes, exact edits, bounded commands, cancellation,
+  deadlines, cleanup, and deterministic Fake-backed tests. See the
+  [workspace plan](docs/plan/PLAN-WORKSPACE.md) and
+  [maintenance guide](docs/learning/WORKSPACE.md).
+- **Tool system** — Phases 0–10 are complete. The four MVP tools (`read`, `write`,
+  `edit`, and `bash`) have bounded schemas, capability dispatch, deterministic
+  presentation, Provider integration, and reliability and security coverage. See the
+  [tool-system plan](docs/plan/PLAN-TOOL-SYSTEM.md) and
+  [maintenance guide](docs/learning/TOOL-SYSTEM.md).
+- **Agent loop** — Phases 0–10 are complete, covering turns, tool continuations,
+  budgets, retries, cancellation, deadlines, ordered events, and interruption safety.
+  See the [agent-loop plan](docs/plan/PLAN-AGENT-LOOP.md) and
+  [maintenance guide](docs/learning/AGENT-LOOP.md).
+- **Runtime** — Phases 0–10 are complete. The single-active-run MVP includes supervised
+  execution, Workspace ownership, start/cancel/await APIs, terminal cleanup,
+  persistent cancellation, bounded deadlines, and Fake and Real Workspace acceptance.
+  See the [runtime plan](docs/plan/PLAN-RUNTIME.md) and
+  [maintenance guide](docs/learning/RUNTIME.md).
+- **Local WebSocket API** — Phases 0–10 are complete. `mix synapse.server` exposes a
+  loopback-only protocol-v1 endpoint with one active run, reconnect-safe execution,
+  bounded snapshots and replay, and explicit stale-cursor reset. It has no
+  authentication and accepts no credentials, capability grants, Provider selection,
+  callbacks, handles, or Runtime options. See the [API plan](docs/plan/PLAN-API.md) and
+  [maintenance guide](docs/learning/API.md).
+- **Web UI** — The independent Svelte 5 client in `ui/web` implements protocol v1,
+  explicit start/cancel, reconnect and replay restoration, accessible responsive
+  presentation, Fake-backed browser acceptance, and opt-in live Tokamak acceptance.
+  See the [UI README](ui/web/README.md) and
+  [maintenance guide](docs/learning/UI.md).
 
-Aggregate model-visible run output defaults to 524,288 bytes. A trusted server
-operator may lower it with `SYNAPSE_MAX_OUTPUT_BYTES=1..524288`; the effective
-ceiling is advertised to the browser in `server.hello`. Individual Provider output,
-Tool argument/result, and streamed-delta limits remain independently bounded.
+### Current operational limits
 
-The independent Svelte 5 web client under `ui/web` implements protocol v1 without
-SvelteKit, a proxy, or Synapse-served assets. It supports explicit start/cancel,
-disconnect-safe reconnect and bounded replay/snapshot restoration, responsive
-accessible presentation, deterministic Fake-backed browser acceptance, and explicit
-opt-in live Tokamak acceptance. The server launch directory becomes the UI's
-editable initial Workspace path; this is a starting directory, not a Bash sandbox.
-Operation and maintenance guidance is in
-[`ui/web/README.md`](ui/web/README.md) and
-[`docs/learning/UI.md`](docs/learning/UI.md).
+- Aggregate model-visible run output defaults to 524,288 bytes. A trusted server
+  operator may lower it with `SYNAPSE_MAX_OUTPUT_BYTES=1..524288`; the effective limit
+  is advertised in `server.hello`. Provider output, Tool arguments and results, and
+  streamed deltas remain independently bounded.
+- The server launch directory is the UI's editable initial Workspace path. It is a
+  starting directory, not a Bash sandbox.
+- The API serves no frontend; the web client is built and run independently.
 
-The step-by-step plan for the first functional model-tool-loop MVP is [`docs/plan/PLAN.md`](docs/plan/PLAN.md).
+The step-by-step plan for the first functional model-tool-loop MVP is
+[`docs/plan/PLAN.md`](docs/plan/PLAN.md).
 
 ## Design Decisions
 

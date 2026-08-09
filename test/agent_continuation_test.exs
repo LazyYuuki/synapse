@@ -83,7 +83,7 @@ defmodule Synapse.Agent.ContinuationTest do
     assert result.tool_calls == 1
     assert result.provider_retries == 0
 
-    {:ok, admission} = Admission.preflight(first_response, Limits.default(), 50, 64_000)
+    {:ok, admission} = Admission.preflight(first_response, Limits.default())
     read_result = present(read_call, {:ok, read_outcome})
 
     assert result.output_bytes ==
@@ -192,7 +192,7 @@ defmodule Synapse.Agent.ContinuationTest do
     assert result.tool_calls == 3
     assert result.provider_retries == 0
 
-    {:ok, admission} = Admission.preflight(first_response, Limits.default(), 50, 64_000)
+    {:ok, admission} = Admission.preflight(first_response, Limits.default())
 
     [read_result, write_result, bash_result] = [
       present(Enum.at(calls, 0), {:ok, read_outcome}),
@@ -474,6 +474,65 @@ defmodule Synapse.Agent.ContinuationTest do
     assert result.tool_calls == 3
   end
 
+  test "ambiguous Tool result is projected back to the model instead of terminating" do
+    run = run_request()
+    provider_ids = provider_operation_ids(run, 2)
+    tool_id = tool_operation_id(run, 1, 1)
+
+    write_call =
+      call("item-write-ambiguous", "call-write-ambiguous", "write", %{
+        "path" => "maybe.txt",
+        "content" => "new",
+        "expected_revision" => "missing"
+      })
+
+    ambiguous =
+      workspace_error(
+        :ambiguous,
+        :durability_unknown,
+        :unknown,
+        :write,
+        tool_id,
+        "maybe.txt"
+      )
+
+    first_response = response!("response-ambiguous", [write_call])
+    final_response = text_response("response-after-ambiguity", "I inspected the uncertainty.")
+
+    entries = [
+      Fake.expect_write(
+        write_request("maybe.txt", "new", :missing),
+        operation_context(tool_id, :write),
+        {:error, ambiguous}
+      )
+    ]
+
+    assert {{:ok, result}, {:ok, 0}, [0, 0]} =
+             run_with(run, entries, provider_ids, fn _event -> :ok end, fn context ->
+               first_request = initial_request(run, context)
+               ambiguous_result = present(write_call, {:error, ambiguous})
+               assert ambiguous_result.status == :ambiguous
+
+               second_request =
+                 continuation_request(
+                   first_request,
+                   context,
+                   first_response,
+                   [ambiguous_result],
+                   2
+                 )
+
+               [
+                 {:turn, first_request, [], {:ok, first_response}},
+                 {:turn, second_request, [], {:ok, final_response}}
+               ]
+             end)
+
+    assert result.text == "I inspected the uncertainty."
+    assert result.turns == 2
+    assert result.tool_calls == 1
+  end
+
   test "natural Bash failure becomes model feedback before diagnosis" do
     run = run_request()
     provider_ids = provider_operation_ids(run, 2)
@@ -504,7 +563,7 @@ defmodule Synapse.Agent.ContinuationTest do
     assert result.tool_calls == 1
   end
 
-  test "final text succeeds on the maximum permitted logical turn" do
+  test "final text succeeds after a configured turn ceiling" do
     {:ok, budget} = Synapse.Budget.new(max_turns: 2)
     run = run_request(budget: budget)
     provider_ids = provider_operation_ids(run, 2)
@@ -523,23 +582,20 @@ defmodule Synapse.Agent.ContinuationTest do
     assert result.text == "Finished at the limit."
   end
 
-  test "a Tool turn at the maximum fails before another Provider request" do
+  test "a Tool turn continues past a configured turn ceiling" do
     {:ok, budget} = Synapse.Budget.new(max_turns: 1)
     run = run_request(budget: budget)
-    [provider_id] = provider_operation_ids(run, 1)
+    provider_ids = provider_operation_ids(run, 2)
 
     script = [
       {:turn, [],
        {:ok,
-        response!("response-turn-budget", [call("item-unknown", "call-unknown", "unknown", %{})])}}
+        response!("response-turn-budget", [call("item-unknown", "call-unknown", "unknown", %{})])}},
+      {:turn, [], {:ok, text_response("response-after-old-budget", "Continued safely.")}}
     ]
 
-    assert {{:error,
-             %AgentError{
-               kind: :budget,
-               reason: :turn_budget_exhausted,
-               details: %{"observed" => 2, "maximum" => 1}
-             }}, {:ok, 0}, [0]} = run_with_script(run, [], [provider_id], script)
+    assert {{:ok, %{turns: 2, text: "Continued safely."}}, {:ok, 0}, [0, 0]} =
+             run_with_script(run, [], provider_ids, script)
   end
 
   test "persistent cancellation after a known batch prevents continuation" do

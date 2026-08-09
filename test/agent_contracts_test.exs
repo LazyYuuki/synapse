@@ -184,7 +184,7 @@ defmodule Synapse.Agent.ContractsTest do
     assert state.provider_retries == 0
     assert state.output_bytes == 0
     assert state.started_at == -1_000
-    assert state.deadline == 899_000
+    assert state.deadline == :infinity
     assert state.status == :running
     assert inspect(state) == "#Synapse.Agent.State<status=:running redacted>"
   end
@@ -206,8 +206,7 @@ defmodule Synapse.Agent.ContractsTest do
     assert {:error, {:deadline, :must_be_monotonic_time_or_infinity}} =
              State.new(Map.put(base, :deadline, nil))
 
-    assert {:error, {:deadline, :wall_time_addition_overflow}} =
-             State.new(Map.put(base, :started_at, 9_223_372_036_854_775_807))
+    assert {:ok, _state} = State.new(Map.put(base, :started_at, 9_223_372_036_854_775_807))
 
     assert {:ok, earlier} = State.new(%{base | started_at: 100, deadline: 500})
     assert earlier.deadline == 500

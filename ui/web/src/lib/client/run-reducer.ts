@@ -41,6 +41,8 @@ export function initialRunState(runId: string, start: StartCommand | null = null
     traceIncomplete: false,
     traceBaseText: '',
     historyReset: false,
+    turnStartedAt: null,
+    lastTurnDurationMs: null,
     knowledge: exactInitialKnowledge(),
   };
 }
@@ -63,6 +65,8 @@ export function stateFromSnapshot(payload: StateSnapshotPayload): RunState {
     traceIncomplete: payload.last_seq > 0,
     traceBaseText: projection.text,
     historyReset: payload.reset,
+    turnStartedAt: null,
+    lastTurnDurationMs: null,
     knowledge: snapshotKnowledge(payload),
   };
 }
@@ -71,6 +75,7 @@ export function applyRunEvent(
   state: RunState,
   payload: RunEventMessage['payload'],
   maxOutputBytes = HARD_CLIENT_MAX_OUTPUT_BYTES,
+  receivedAt = performance.now(),
 ): RunReductionResult {
   const sequenceFailure = validateSequence(state, payload.run_id, payload.seq);
   if (sequenceFailure) return sequenceFailure;
@@ -91,11 +96,14 @@ export function applyRunEvent(
     LIMITS.activityBytes,
   );
 
+  const timing = turnTiming(state, payload.event, receivedAt);
+
   return {
     ok: true,
     state: {
       ...state,
       ...reduced.state,
+      ...timing,
       lastAppliedSeq: payload.seq,
       activity: timeline.entries,
       activityBytes: timeline.bytes,
@@ -104,6 +112,26 @@ export function applyRunEvent(
       traceIncomplete: state.traceIncomplete || trace.truncated,
       traceBaseText: trace.baseText,
     },
+  };
+}
+
+function turnTiming(
+  state: RunState,
+  event: RunEvent,
+  receivedAt: number,
+): Pick<RunState, 'turnStartedAt' | 'lastTurnDurationMs'> {
+  if (event.type === 'turn.started') {
+    return { turnStartedAt: receivedAt, lastTurnDurationMs: null };
+  }
+  if (event.type === 'turn.completed' && state.turnStartedAt !== null) {
+    return {
+      turnStartedAt: null,
+      lastTurnDurationMs: Math.max(0, receivedAt - state.turnStartedAt),
+    };
+  }
+  return {
+    turnStartedAt: state.turnStartedAt,
+    lastTurnDurationMs: state.lastTurnDurationMs,
   };
 }
 

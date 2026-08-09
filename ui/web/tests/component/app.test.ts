@@ -69,35 +69,9 @@ describe('interactive operator console', () => {
     expect(JSON.stringify([...context.storage.values.entries()])).not.toContain('synthetic');
   });
 
-  it('preserves output Budget drafts while hello replaces the effective server ceiling', async () => {
-    const context = await readyApp();
-    await fillComposer('/tmp/project', 'Inspect');
-    await fireEvent.click(screen.getByText('Advanced budget limits'));
-    const outputBudget = screen.getByLabelText('Output bytes');
-    await fireEvent.input(outputBudget, { target: { value: '70000' } });
-
-    await reconnectWith(context, '/synthetic/lower-output', 64_000);
-    expect(outputBudget).toHaveValue('70000');
-    expect(screen.getByText('1-64,000')).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('button', { name: 'Start run' }));
-    expect(document.activeElement).toBe(outputBudget);
-    expect(context.factory.sockets.at(-1)?.sent).toHaveLength(0);
-
-    await reconnectWith(context, '/synthetic/higher-output', 524_288);
-    expect(outputBudget).toHaveValue('70000');
-    expect(screen.getByText('1-524,288')).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('button', { name: 'Start run' }));
-    expect(JSON.parse(context.factory.sockets.at(-1)?.sent.at(-1) ?? '{}')).toMatchObject({
-      type: 'run.start',
-      payload: { budget: { max_output_bytes: 70_000 } },
-    });
-  });
-
   it('preserves the complete draft after a retryable pre-admission error', async () => {
     const context = await readyApp();
     await fillComposer('/tmp/project', 'Keep this prompt', 'model-a');
-    await fireEvent.click(screen.getByText('Advanced budget limits'));
-    await fireEvent.input(screen.getByLabelText('Maximum turns'), { target: { value: '3' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Start run' }));
 
     context.socket.emitMessage(
@@ -113,7 +87,6 @@ describe('interactive operator console', () => {
     expect(screen.getByLabelText(/Workspace path/)).toHaveValue('/tmp/project');
     expect(screen.getByLabelText(/Prompt/)).toHaveValue('Keep this prompt');
     expect(screen.getByLabelText(/Model/)).toHaveValue('model-a');
-    expect(screen.getByLabelText('Maximum turns')).toHaveValue('3');
   });
 
   it('installs only the accepted run ID, clears only prompt, and focuses Current run', async () => {
@@ -135,7 +108,7 @@ describe('interactive operator console', () => {
     expect(screen.getByRole('button', { name: 'Start run' })).toBeDisabled();
   });
 
-  it('rejects invalid URL, path, and Budget before constructing or sending', async () => {
+  it('rejects invalid URL and path before constructing or sending', async () => {
     const invalid = createTestClient();
     const invalidView = render(App, { createClient: () => invalid.client });
     await tick();
@@ -153,17 +126,6 @@ describe('interactive operator console', () => {
     expect(context.socket.sent).toHaveLength(0);
     expect(screen.getAllByText(/absolute POSIX workspace path/)).not.toHaveLength(0);
     expect(document.activeElement).toBe(screen.getByLabelText(/Workspace path/));
-
-    await fireEvent.input(screen.getByLabelText(/Workspace path/), {
-      target: { value: '/tmp/project' },
-    });
-    await fireEvent.click(screen.getByText('Advanced budget limits'));
-    await fireEvent.input(screen.getByLabelText('Maximum turns'), { target: { value: '101' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Start run' }));
-    expect(context.socket.sent).toHaveLength(0);
-    expect(
-      screen.getAllByText(/whole number inside the displayed protocol range/),
-    ).not.toHaveLength(0);
   });
 
   it('sends cancellation once, keeps disconnect separate, and enables New run only after terminal', async () => {
@@ -291,6 +253,8 @@ describe('interactive operator console', () => {
     expect(within(activeTool).getByText(/Tool call \/ read/)).toBeInTheDocument();
     expect(within(activeTool).getByText(/^Active/)).toBeInTheDocument();
     expect(activeTool).toHaveAttribute('open');
+    const runningElapsedValue = screen.getByText('Turn elapsed').nextElementSibling;
+    expect(runningElapsedValue).toHaveTextContent(/\d+\.\d s running/);
 
     context.socket.emitMessage(
       serverEnvelope('run.event', null, {
@@ -331,6 +295,9 @@ describe('interactive operator console', () => {
     );
     await tick();
     expect(screen.getByText(/Turn completed/)).toBeInTheDocument();
+    const elapsedValue = screen.getByText('Turn elapsed').nextElementSibling;
+    expect(elapsedValue).not.toHaveTextContent('--');
+    expect(elapsedValue).toHaveTextContent(/\d+\.\d s/);
     output.focus();
 
     context.socket.emitMessage(

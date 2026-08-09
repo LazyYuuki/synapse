@@ -52,7 +52,7 @@ const errorCases: readonly {
     message: 'Command payload is invalid',
     retryable: false,
     requestId: 'required',
-    guidance: 'Server policy rejected the submitted fields. Review workspace, model, and Budget.',
+    guidance: 'Server policy rejected the submitted fields. Review workspace and model.',
   },
   {
     code: 'run_busy',

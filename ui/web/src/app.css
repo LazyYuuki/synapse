@@ -343,7 +343,7 @@ footer {
 }
 
 .run-metadata.compact {
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   border-bottom: 1px solid var(--line);
 }
 
@@ -821,7 +821,6 @@ textarea:disabled {
   -webkit-text-fill-color: #777970;
 }
 
-.budget-disclosure,
 .protocol-disclosure {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -834,11 +833,6 @@ summary {
   font-weight: 700;
 }
 
-.budget-disclosure summary {
-  padding: 0.75rem 0;
-}
-
-.budget-disclosure p,
 .protocol-disclosure p {
   margin: 0 0 0.8rem;
   color: var(--muted);
@@ -884,30 +878,6 @@ summary {
 
 .protocol-list small {
   color: var(--muted);
-}
-
-.budget-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.8rem;
-  padding-bottom: 1rem;
-}
-
-.budget-field {
-  min-width: 0;
-  display: grid;
-  gap: 0.3rem;
-}
-
-.budget-field label {
-  color: var(--ink);
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.budget-field small {
-  color: var(--muted);
-  font: 0.63rem var(--mono);
 }
 
 .form-actions {
@@ -1695,7 +1665,6 @@ footer {
     grid-template-columns: 1fr;
   }
 
-  .budget-grid,
   .run-actions {
     grid-template-columns: 1fr;
   }

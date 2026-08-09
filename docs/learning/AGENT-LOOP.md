@@ -142,28 +142,27 @@ Result content.
 
 An ordinary `:error` Result has a known side-effect outcome such as `not_applied`
 or `completed`; it remains paired model feedback and later calls may run. An
-`:ambiguous` Result means the side effect may have occurred. Runner starts no later
-Tool or Provider operation and returns a Tool ambiguity terminal. If cancellation
-is simultaneously observable, the run is interrupted while retaining ambiguity
-identity and `outcome: unknown` evidence.
+`:ambiguous` Result means the side effect may have occurred. Runner preserves that
+exact paired model feedback and continues so the model can inspect state, avoid a
+blind retry, or report the uncertainty to the user.
 
 ## Retry
 
-Transparent Provider retry requires every condition below:
+Provider retry requires every condition below:
 
-1. The normalized Provider Error has `retryable: true`.
-2. The Error has `output_started: false`.
-3. Its kind is one of `rate_limited`, `unavailable`, `timeout`, `transport`, or `upstream`.
-4. Aggregate `max_provider_retries` capacity remains.
-5. The persistent cancellation probe is false.
-6. The bounded delay callback returns an integer from 0 through 10,000 milliseconds.
-7. The delay and next attempt remain strictly before the effective deadline.
+1. The Error is an `interrupted` stream, or it has `retryable: true` and kind
+   `rate_limited`, `unavailable`, `timeout`, `transport`, or `upstream`.
+2. Fewer than ten retries have been made for this immutable Request.
+3. The persistent cancellation probe is false.
+4. The bounded delay callback returns an integer from 0 through 10,000 milliseconds.
+5. The delay and next attempt remain strictly before the effective deadline.
 
-Configuration, authentication, authorization, protocol, and explicit interruption
-errors are never retried. Any visible text or Tool progress blocks replay.
+Configuration, authentication, authorization, and protocol errors are never
+retried. Partial progress may already be visible when an interrupted request is
+replayed, but no Tool executes until one attempt returns a complete Response.
 
 ```text
-retryable pre-output Error
+transient Provider Error
   -> charge retry
   -> validate bounded delay
   -> wait for delay or matching cancel message
@@ -192,9 +191,9 @@ Runtime cancellation state = true
 A crashing cancellation probe fails closed as cancellation. Actual active-operation
 tracking and message routing remain Runtime work.
 
-## Budgets And Deadlines
+## Context And Accounting
 
-Budget charges happen at structural boundaries:
+Accounting happens at structural boundaries without imposing aggregate run caps:
 
 | Counter | Charge point |
 | --- | --- |
@@ -203,12 +202,12 @@ Budget charges happen at structural boundaries:
 | Tool calls | Immediately before ToolStarted and Executor invocation |
 | Provider output | After complete terminal Response normalization |
 | Tool output | After each known paired Result, before later work |
-| Wall time | Checked before each operation, retry, and continuation |
+| Provider input | Estimated from the complete request before every Provider call |
 
-The effective absolute monotonic deadline is the earlier of `started_at +
-max_wall_time_ms` and Runtime's supplied deadline. Provider and Tool contexts
-receive that same value. Wall-clock time, timezone, and sleeps are not accounting
-inputs.
+Runtime may supply an absolute monotonic deadline; it defaults to `:infinity` and
+Provider and Tool contexts receive that same value. Wall-clock time and timezone
+are not accounting inputs. Bash timeout, inactivity, and output limits are owned by
+Tool and Workspace policy.
 
 Worked boundary example:
 
@@ -218,12 +217,13 @@ Admit turn 2:  turns=2
 Provider emits 100 complete bytes: output_bytes=1000
 Admit one Tool: tool_calls=3
 Known Result is 80 bytes: output_bytes=1080
-Continuation is allowed only if all maxima are at least those exact values and
-the supplied monotonic timestamp is before the effective deadline.
+Continuation is allowed while the complete next Provider request remains within
+272,000 estimated tokens and any explicit Runtime deadline remains open.
 ```
 
-Reaching an exact limit may complete. Starting one operation beyond a limit fails
-before that operation. Whole-batch Tool capacity failure executes zero calls.
+After every 20 completed turns, the next Provider request receives a transient
+self-assessment instruction. It asks the model to stop and request specific user
+help if stuck, or continue only with a concrete next step.
 
 ## Terminal Outcomes And Events
 
@@ -273,7 +273,7 @@ in `Synapse.Agent` moduledoc.
 | Safe retry and exact Request reuse | `test/agent_retry_cancellation_test.exs` |
 | Cancellation before/during operations | `test/agent_retry_cancellation_test.exs` |
 | Ambiguous Tool terminal | `test/agent_tool_execution_test.exs` |
-| Exact and exhausted Budget boundaries | `test/agent_budget_test.exs` |
+| Unbounded accounting and explicit deadline | `test/agent_budget_test.exs` |
 | Full Fake loop | `test/agent_continuation_test.exs` |
 | Temporary Real Workspace | `test/agent_real_workspace_test.exs` |
 | Opt-in live Tokamak loop | `test/live_agent_loop_test.exs` |
@@ -320,7 +320,8 @@ documentation:
 6. Run, item, call, and operation IDs have distinct producers and purposes.
 7. Whole-batch preflight prevents a malformed later call from following an earlier side effect.
 8. Ordinary errors have known outcomes; ambiguity means a side effect may have occurred.
-9. Retry requires retryable, pre-output, allowlisted kind, budget, delay, deadline, and no cancellation.
+9. Retry requires a transient kind, fewer than ten prior retries for the Request,
+   a valid delay, an open deadline, and no cancellation.
 10. Persistent cancellation remains visible after a lower layer consumes its message.
 11. Every Budget counter is charged at the explicit boundaries in the table above.
 12. The model-visible matrix identifies every projected field and every local authority.

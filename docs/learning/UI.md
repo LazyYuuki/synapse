@@ -105,7 +105,7 @@ production code.
 | `src/lib/client/timeline.ts`                 | Generic entry-count and encoded-byte bounded timeline append.                                             |
 | `src/lib/client/protocol-timeline.svelte.ts` | Sanitized bounded inbound/outbound inspector projection.                                                  |
 | `src/lib/client/server-errors.svelte.ts`     | Stable server error code to fixed local operator guidance.                                                |
-| `src/lib/client/composer.ts`                 | Prompt, path, model, and lowering-only Budget form validation.                                            |
+| `src/lib/client/composer.ts`                 | Prompt, path, and model form validation.                                                                   |
 | `src/lib/client/client.svelte.ts`            | Composition root joining connection callbacks to run, diagnostics, and error controllers.                 |
 
 ### Presentation modules
@@ -136,7 +136,7 @@ App.svelte start
 ```
 
 For prompt `Inspect this workspace`, hello-prefilled path `/tmp/example`, omitted
-model, and omitted Budget, the complete command is:
+model, the complete command is:
 
 ```json
 {
@@ -147,7 +147,7 @@ model, and omitted Budget, the complete command is:
 }
 ```
 
-Optional model and nonblank Budget fields are added only after local validation.
+An optional model is added only after local validation.
 The encoder creates a fresh allowlisted object and never spreads form state. A model
 name is public configuration metadata, not a credential and not Provider authority.
 
@@ -204,12 +204,10 @@ not refill it immediately; the next validated hello restores the default. The pa
 remains memory-only and is redacted from the protocol timeline and copied
 diagnostics.
 
-Hello also advertises `max_output_bytes` in `1..524288`. The Advanced Budget form
-uses that value as the current lowering-only maximum while ready, retains the last
-validated maximum through an outage, and replaces it on the next hello. It never
-clamps or rewrites a draft; a value made excessive by reconnect remains visible and
-fails on explicit Start. The numeric policy is safe to include in diagnostics and
-is never stored in `sessionStorage`.
+Hello also advertises `max_output_bytes` in `1..524288` as a projection and wire
+validation bound. The composer exposes no aggregate run-budget controls. The
+numeric transport policy is safe to include in diagnostics and is never stored in
+`sessionStorage`.
 
 After reconnect, an in-memory run subscribes with its last applied cursor. The
 server first acknowledges replay with `run.snapshot` in replay mode, including the
@@ -239,7 +237,7 @@ synapse.api_url
 synapse.run_id
 ```
 
-Prompt, workspace path, model, Budget, output, terminal, cursor, activity, and
+Prompt, workspace path, model, output, terminal, cursor, activity, and
 diagnostics stay memory-only. RunManager/application restart or completed-run
 eviction returns `run_not_found`; replay never survives that boundary.
 

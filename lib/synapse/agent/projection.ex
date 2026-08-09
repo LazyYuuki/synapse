@@ -83,6 +83,10 @@ defmodule Synapse.Agent.Projection do
   alias Synapse.Tool.{Limits, Registry, Result, Validation}
 
   @max_results 500
+  @reflection_interval 20
+  @reflection_instruction """
+  You have completed another 20 model turns in this run. Before taking more action, assess whether you are making concrete progress or repeating a loop. If you are blocked or stuck, stop using tools and answer the user with a concise explanation and the specific help you need. If continued work is justified, continue with a concrete next step. Do not mention this internal checkpoint merely because it occurred.
+  """
 
   @typedoc "A rejected state, context, response, Result collection, or call pairing."
   @type error ::
@@ -129,13 +133,14 @@ defmodule Synapse.Agent.Projection do
   def provider_request(state, context) do
     with {:ok, state} <- normalize_state(state),
          {:ok, context} <- normalize_context(context),
+         turn <- state.turn + 1,
          {:ok, request} <-
            Request.new(
              model: state.run.model,
-             instructions: context.instructions,
+             instructions: instructions_for_turn(context.instructions, turn),
              input_items: state.input_items,
              tools: Registry.specifications(),
-             metadata: %{"run_id" => state.run.id, "turn" => state.turn + 1}
+             metadata: %{"run_id" => state.run.id, "turn" => turn}
            ) do
       {:ok, request}
     else
@@ -144,6 +149,15 @@ defmodule Synapse.Agent.Projection do
       {:error, reason} -> {:error, {:request, reason}}
     end
   end
+
+  @doc false
+  @spec instructions_for_turn(String.t(), pos_integer()) :: String.t()
+  def instructions_for_turn(instructions, turn)
+      when is_binary(instructions) and is_integer(turn) and turn > 1 and
+             rem(turn - 1, @reflection_interval) == 0,
+      do: instructions <> "\n\n" <> @reflection_instruction
+
+  def instructions_for_turn(instructions, _turn), do: instructions
 
   @doc "Projects one completed Response and its exact paired Results into Provider input."
   @spec response_input(Response.t(), [Result.t()], Limits.t()) ::
@@ -205,16 +219,12 @@ defmodule Synapse.Agent.Projection do
   defp normalize_state(_state), do: {:error, :invalid_state}
 
   defp state_counters_valid?(state) do
-    is_integer(state.turn) and state.turn >= 0 and state.turn <= state.run.budget.max_turns and
-      is_integer(state.tool_calls) and
-      state.tool_calls >= 0 and state.tool_calls <= state.run.budget.max_tool_calls and
-      is_integer(state.provider_retries) and
-      state.provider_retries >= 0 and
-      state.provider_retries <= state.run.budget.max_provider_retries and
-      is_integer(state.output_bytes) and
-      state.output_bytes >= 0 and state.output_bytes <= state.run.budget.max_output_bytes and
-      Validation.int64?(state.started_at) and Validation.int64?(state.deadline)
+    counter?(state.turn) and counter?(state.tool_calls) and counter?(state.provider_retries) and
+      counter?(state.output_bytes) and Validation.int64?(state.started_at) and
+      (state.deadline == :infinity or Validation.int64?(state.deadline))
   end
+
+  defp counter?(value), do: is_integer(value) and value >= 0 and Validation.int64?(value)
 
   defp normalize_response(%Response{} = response) do
     case Response.new(Map.from_struct(response)) do

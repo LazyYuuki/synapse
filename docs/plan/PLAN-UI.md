@@ -37,7 +37,7 @@ Browser
 http://127.0.0.1:5173
   -> ws://127.0.0.1:4848/v1/socket
   -> server.hello
-  -> run.start(prompt, cwd, optional model and Budget lowering)
+  -> run.start(prompt, cwd, optional model and conversation)
   -> run.accepted
   -> ordered run.event messages
   -> optional run.cancel
@@ -149,8 +149,7 @@ must never depend on frontend source, package output, or client state.
 - The last sequence actually applied to the visible run.
 - One local run projection derived from validated events or replaced by a snapshot.
 - One bounded diagnostic protocol timeline for local debugging.
-- Form state for API URL, prompt, absolute workspace path, optional model, and
-  optional Budget lowering.
+- Form state for API URL, prompt, absolute workspace path, and optional model.
 - Explicit start, cancel, reconnect, disconnect, clear, and new-run actions.
 - Browser-only presentation, accessibility, responsive layout, and focus behavior.
 
@@ -274,7 +273,7 @@ type StartCommand = ClientEnvelope<
     prompt: string;
     cwd: string;
     model?: string;
-    budget?: Partial<Budget>;
+    conversation?: ConversationMessage[];
   }
 >;
 
@@ -331,9 +330,8 @@ The exact `server.hello` payload is
 pass the same 4,096-byte absolute-path validation as the start composer. First
 readiness fills an empty Workspace field. Reconnect updates an automatic value,
 preserves a manual override, and restores a cleared field only on the next ready
-generation. `max_output_bytes` must be an integer in `1..524288`; each ready
-generation replaces the displayed lowering ceiling without clamping or rewriting
-the operator's memory-only Budget draft.
+generation. `max_output_bytes` must be an integer in `1..524288` and remains a
+projection/wire validation bound rather than a composer control.
 
 Do not use `JSON.parse(data) as ServerMessage`, generated `any`, or a compile-time
 type assertion as runtime validation. A malformed server frame is a protocol fault:
@@ -767,10 +765,9 @@ Phase 2 uses a bounded parser rather than asserting a `JSON.parse` result. It re
 duplicate keys, malformed Unicode, excess JSON structure, non-integer numeric token
 forms in integer fields, and values above `Number.MAX_SAFE_INTEGER` before building
 fresh typed messages. Client encoders mirror Elixir's Unicode-trim behavior, exact
-canonical run-ID form, NUL-free absolute path rule, and per-field Budget minima and
-maxima. Trusted server policy may still lower these browser maxima. Protocol v1
-advertises only effective `max_output_bytes` in `server.hello`; all other lower
-server policy remains authoritative.
+canonical run-ID form and NUL-free absolute path rule. Protocol v1 advertises the
+effective projection `max_output_bytes` in `server.hello`; execution policy remains
+server-owned.
 
 ### Types
 
@@ -779,15 +776,12 @@ server policy remains authoritative.
 - [x] Define each concrete `run.event` variant.
 - [x] Define projection, Active Tool, Agent Result, Agent/Runtime/API error, and
       terminal unions.
-- [x] Define the seven Budget fields without accepting arbitrary keys.
 - [x] Keep wire types separate from rendered view models.
 
 ### Encoding
 
 - [x] Implement one encoder per command type.
-- [x] Omit optional model and Budget fields when blank.
-- [x] Accept only integer Budget fields, require each exact field minimum, and reject
-      negative, unsafe, or above-protocol values.
+- [x] Omit the optional model when blank.
 - [x] Validate prompt, path, model, request ID, run ID, and cursor bounds before send.
 - [x] Measure final encoded bytes with `TextEncoder`.
 - [x] Build exact string-keyed JSON without spreading form state.
@@ -977,7 +971,7 @@ frames and are independently bounded to 500 entries and one encoded MiB.
 
 Phase 5 exposes the composed controllers without changing their authority boundary.
 The selected post-acceptance draft rule clears only Prompt after correlated
-`run.accepted`; Workspace path, Model, and Budget remain in memory for a later run.
+`run.accepted`; Workspace path and Model remain in memory for a later run.
 No draft field is persisted. While start is pending, the submitted draft is locked.
 New Run is terminal-or-confirmed-stale only and replaces a ready socket so completed
 run subscriptions cannot accumulate against the per-connection limit.
@@ -994,10 +988,9 @@ run subscriptions cannot accumulate against the per-connection limit.
 
 - [x] Add required prompt and absolute workspace path fields.
 - [x] Add optional model field that is omitted when blank.
-- [x] Add a collapsed advanced Budget section with all seven optional fields.
 - [x] Validate UTF-8 byte ceilings and basic absolute POSIX path shape locally.
-- [x] Let server policy remain authoritative for model allowlist, Budget lowering,
-      Workspace support, and capabilities.
+- [x] Let server policy remain authoritative for model allowlist, Workspace support,
+      and capabilities.
 - [x] Disable start until hello is valid and no active run is reserved.
 - [x] Preserve form input on pre-admission `server.error`.
 - [x] Clear or retain form input after acceptance according to one documented rule;
@@ -1027,8 +1020,8 @@ run subscriptions cannot accumulate against the per-connection limit.
 ### Tests
 
 - [x] Start encodes exact required fields.
-- [x] Blank model and Budget are omitted.
-- [x] Invalid path, prompt, URL, and Budget are rejected before send.
+- [x] Blank model is omitted.
+- [x] Invalid path, prompt, and URL are rejected before send.
 - [x] Pre-admission error preserves composer state.
 - [x] Accepted start installs only the server run ID.
 - [x] Cancel is explicit, idempotent in UI state, and separate from disconnect.

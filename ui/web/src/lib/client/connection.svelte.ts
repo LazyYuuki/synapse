@@ -294,7 +294,6 @@ export function createConnectionController(
         prompt: input.prompt,
         cwd: input.cwd,
         model: input.model,
-        budget: input.budget,
         conversation: input.conversation,
       }),
     );

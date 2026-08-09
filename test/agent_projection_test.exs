@@ -40,7 +40,7 @@ defmodule Synapse.Agent.ProjectionTest do
     ]
 
     assert state.input_items == expected_input
-    assert state.deadline == 901_000
+    assert state.deadline == :infinity
 
     assert {:ok, request} = Projection.provider_request(state, context)
     assert request.model == "test-model"
@@ -56,6 +56,26 @@ defmodule Synapse.Agent.ProjectionTest do
     assert Enum.map(encoded["tools"], & &1["name"]) == ~w(read write edit bash)
     refute Map.has_key?(encoded, "metadata")
     refute Map.has_key?(encoded, "previous_response_id")
+  end
+
+  test "adds a transient self-assessment after every 20 completed turns", %{context: context} do
+    {:ok, %State{} = initial} = Projection.initial_state(run_request("Keep working"), context, 0)
+
+    for turn <- [0, 19, 21, 39] do
+      assert {:ok, request} = Projection.provider_request(%State{initial | turn: turn}, context)
+      assert request.instructions == context.instructions
+      assert request.input_items == initial.input_items
+    end
+
+    for completed_turns <- [20, 40] do
+      assert {:ok, request} =
+               Projection.provider_request(%State{initial | turn: completed_turns}, context)
+
+      assert request.instructions =~ "assess whether you are making concrete progress"
+      assert request.instructions =~ "stop using tools"
+      assert request.metadata["turn"] == completed_turns + 1
+      assert request.input_items == initial.input_items
+    end
   end
 
   test "projects validated conversation before the current user prompt", %{context: context} do

@@ -738,7 +738,7 @@ defmodule Synapse.API.RunManagerTest do
     assert decode(second)["payload"]["seq"] == 2
   end
 
-  test "projection text accepts the exact byte ceiling and rejects one byte over without partial state" do
+  test "projection text stops growing at its retention ceiling without stopping the run" do
     {:ok, manager} = start_manager()
     {run_id, _session} = start_one(manager)
     config = config(manager)
@@ -779,7 +779,7 @@ defmodule Synapse.API.RunManagerTest do
     before = run(manager, run_id)
     assert byte_size(before.projection.text) == config.max_projection_text_bytes
 
-    assert {:error, :closed} =
+    assert :ok =
              RunManager.record_event(
                manager,
                event(:text_delta,
@@ -792,10 +792,10 @@ defmodule Synapse.API.RunManagerTest do
                )
              )
 
-    after_rejection = run(manager, run_id)
-    assert after_rejection.projection.text == before.projection.text
-    assert after_rejection.last_seq == before.last_seq
-    assert after_rejection.sink_rejected
+    after_limit = run(manager, run_id)
+    assert after_limit.projection.text == before.projection.text
+    assert after_limit.last_seq == before.last_seq + 1
+    refute after_limit.sink_rejected
   end
 
   test "maximum successful Result remains accounted and crosses a snapshot wire once" do

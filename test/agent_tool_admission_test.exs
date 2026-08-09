@@ -73,7 +73,7 @@ defmodule Synapse.Agent.AdmissionTest do
 
     response = response!("response-source-order", output_items)
 
-    assert {:ok, admission} = Admission.preflight(response, Limits.default(), 10, 64_000)
+    assert {:ok, admission} = Admission.preflight(response, Limits.default())
     assert admission.response == response
 
     assert Enum.map(admission.calls, & &1.call_id) ==
@@ -102,7 +102,7 @@ defmodule Synapse.Agent.AdmissionTest do
       ])
 
     assert {:ok, %Admission{calls: [admitted]}} =
-             Admission.preflight(response, Limits.default(), 1, 64_000)
+             Admission.preflight(response, Limits.default())
 
     assert admitted.name == "read"
     assert admitted.arguments == %{"not_a_read_field" => "retained"}
@@ -119,7 +119,7 @@ defmodule Synapse.Agent.AdmissionTest do
     response =
       response!("response-progress-order", [message("message-1", "Checking"), first, second])
 
-    {:ok, admission} = Admission.preflight(response, Limits.default(), 2, 64_000)
+    {:ok, admission} = Admission.preflight(response, Limits.default())
 
     progress = [
       completed_progress(second),
@@ -192,7 +192,7 @@ defmodule Synapse.Agent.AdmissionTest do
       response = response!("response-invalid-#{index}", [invalid_call])
 
       assert {:error, :invalid_function_call_batch} =
-               Admission.preflight(response, Limits.default(), 1, 64_000)
+               Admission.preflight(response, Limits.default())
     end)
   end
 
@@ -211,15 +211,15 @@ defmodule Synapse.Agent.AdmissionTest do
     refute_received {:run_event, %Event.ToolCompleted{}}
   end
 
-  test "rejects the whole batch when remaining Tool-call budget is insufficient" do
+  test "admits the whole batch regardless of obsolete aggregate Tool-call policy" do
     response =
       response!("response-call-budget", [
         call("item-1", "call-1", "read", %{"path" => "one"}),
         call("item-2", "call-2", "read", %{"path" => "two"})
       ])
 
-    assert {:error, {:tool_call_budget_exhausted, 2, 1}} =
-             Admission.preflight(response, Limits.default(), 1, 64_000)
+    assert {:ok, %Admission{calls: calls}} = Admission.preflight(response, Limits.default())
+    assert Enum.map(calls, & &1.call_id) == ["call-1", "call-2"]
 
     test_pid = self()
     run = run_request(max_tool_calls: 1)
@@ -227,29 +227,25 @@ defmodule Synapse.Agent.AdmissionTest do
 
     with_context(test_pid, Fake, fn context, workspace ->
       Fake.with_script(operation_id, [{:turn, [], {:ok, response}}], fn ->
-        assert {:error,
-                %Error{
-                  kind: :budget,
-                  reason: :tool_call_budget_exhausted,
-                  details: %{"observed" => 2, "maximum" => 1}
-                }} = Runner.run(run, context)
+        assert {:error, %Error{kind: :provider, reason: :provider_failed}} =
+                 Runner.run(run, context)
 
         assert {:ok, 0} = WorkspaceFake.remaining_operations(workspace)
       end)
     end)
 
-    refute_received {:run_event, %Event.ToolStarted{}}
+    assert_received {:run_event, %Event.ToolStarted{call_id: "call-1"}}
+    assert_received {:run_event, %Event.ToolStarted{call_id: "call-2"}}
   end
 
-  test "accounts mixed terminal output and rejects it before execution when over budget" do
+  test "accounts mixed terminal output without an aggregate output ceiling" do
     response =
       response!("response-output-budget", [
         message("message-output", "1234567"),
         call("item-output", "call-output", "unknown", %{})
       ])
 
-    assert {:error, {:output_budget_exhausted, 9, 8}} =
-             Admission.preflight(response, Limits.default(), 1, 8)
+    assert {:ok, %Admission{output_bytes: 9}} = Admission.preflight(response, Limits.default())
 
     test_pid = self()
     run = run_request(max_output_bytes: 8)
@@ -257,18 +253,14 @@ defmodule Synapse.Agent.AdmissionTest do
 
     with_context(test_pid, Fake, fn context, workspace ->
       Fake.with_script(operation_id, [{:turn, [], {:ok, response}}], fn ->
-        assert {:error,
-                %Error{
-                  kind: :budget,
-                  reason: :output_budget_exhausted,
-                  details: %{"observed" => 9, "maximum" => 8}
-                }} = Runner.run(run, context)
+        assert {:error, %Error{kind: :provider, reason: :provider_failed}} =
+                 Runner.run(run, context)
 
         assert {:ok, 0} = WorkspaceFake.remaining_operations(workspace)
       end)
     end)
 
-    refute_received {:run_event, %Event.ToolStarted{}}
+    assert_received {:run_event, %Event.ToolStarted{call_id: "call-output"}}
   end
 
   test "rejects duplicate IDs, bare calls, progress events, and no-call Responses" do
@@ -286,7 +278,7 @@ defmodule Synapse.Agent.AdmissionTest do
 
     for input <- [forged_duplicate, first, progress, no_calls] do
       assert {:error, :invalid_function_call_batch} =
-               Admission.preflight(input, Limits.default(), 2, 64_000)
+               Admission.preflight(input, Limits.default())
     end
   end
 

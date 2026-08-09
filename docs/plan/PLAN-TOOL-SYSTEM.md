@@ -470,9 +470,9 @@ Rules:
 - Bash presentation may clip retained output after a natural known exit without
   changing command outcome. `presentation_truncated` records that model-visible
   clipping.
-- If raw Bash output crosses the Workspace ProcessSpec ceiling, Workspace stops
-  the unknown-footprint command and Tool returns ambiguous. That is different
-  from post-completion presentation clipping.
+- If raw Bash output crosses the Workspace ProcessSpec retention allowance,
+  Workspace discards excess bytes, records truncation, and lets Bash reach its
+  natural exit. Tool may additionally clip the retained prefix for model context.
 - Arithmetic uses checked non-negative integer accounting and fails closed before
   allocation when a configured or computed bound is unreasonable.
 
@@ -668,7 +668,7 @@ module execution API is part of the MVP.
 - [x] Confirm every initial Tool limit and accounting rule in this plan.
 - [x] Confirm Provider's 64,000-byte argument/output limits against current code.
 - [x] Confirm Workspace ceilings used by each adapter.
-- [x] Confirm presentation clipping versus Workspace output-limit termination.
+- [x] Confirm Tool presentation clipping versus nonterminal Workspace retention truncation.
 - [x] Confirm natural non-zero Bash exit is Tool error with known process evidence.
 - [x] Confirm forced unknown-footprint process stop remains ambiguous.
 - [x] Confirm conservative post-dispatch callback-crash classification.
@@ -682,7 +682,7 @@ module execution API is part of the MVP.
 - [x] Explain why schemas do not replace runtime validation.
 - [x] Explain why capability omission from a turn does not replace enforcement.
 - [x] Explain why Tool and Workspace enforce different layers of authority.
-- [x] Explain why Bash output-limit termination can be ambiguous.
+- [x] Confirm retained-output truncation does not change Bash outcome.
 
 ### Phase Complete When
 

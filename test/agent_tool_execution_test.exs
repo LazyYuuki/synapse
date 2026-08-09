@@ -308,7 +308,7 @@ defmodule Synapse.Agent.ToolExecutionTest do
     ])
   end
 
-  test "ambiguous Write retains safe correlation and stops a later Bash" do
+  test "ambiguous Write is retained while later Tool calls continue" do
     test_pid = self()
     run = run_request()
     write_operation_id = tool_operation_id(run, 1)
@@ -350,29 +350,14 @@ defmodule Synapse.Agent.ToolExecutionTest do
       )
     ]
 
-    assert {{:error, error}, {:ok, 1}, _provider_id} =
+    assert {{:error, %AgentError{kind: :provider, reason: :provider_failed}}, {:ok, 0},
+            _provider_id} =
              run_with(
                run,
                response!("response-write-ambiguity", calls),
                entries,
                event_sink(test_pid)
              )
-
-    assert %AgentError{
-             kind: :tool,
-             reason: :tool_ambiguous,
-             operation_id: ^write_operation_id,
-             details: %{
-               "call_id" => "call-write",
-               "tool_name" => "write",
-               "operation_id" => ^write_operation_id,
-               "outcome" => "unknown",
-               "status" => "ambiguous"
-             }
-           } = error
-
-    refute inspect(error) =~ "recognizable-secret-content"
-    refute inspect(error.details) =~ "recognizable-secret-content"
 
     assert_receive {:run_event,
                     %Event.ToolCompleted{
@@ -381,10 +366,11 @@ defmodule Synapse.Agent.ToolExecutionTest do
                       metadata: %{"tool" => "write", "outcome" => "unknown"}
                     }}
 
-    refute_received {:run_event, %Event.ToolStarted{call_id: "call-bash"}}
+    assert_receive {:run_event, %Event.ToolStarted{call_id: "call-bash"}}
+    assert_receive {:run_event, %Event.ToolCompleted{call_id: "call-bash", status: :ok}}
   end
 
-  test "ambiguous Bash stops a later Read" do
+  test "ambiguous Bash is retained while later Tool calls continue" do
     test_pid = self()
     run = run_request()
     bash_operation_id = tool_operation_id(run, 1)
@@ -423,7 +409,8 @@ defmodule Synapse.Agent.ToolExecutionTest do
       )
     ]
 
-    assert {{:error, %AgentError{reason: :tool_ambiguous}}, {:ok, 1}, _provider_id} =
+    assert {{:error, %AgentError{kind: :provider, reason: :provider_failed}}, {:ok, 0},
+            _provider_id} =
              run_with(
                run,
                response!("response-bash-ambiguity", calls),
@@ -431,7 +418,8 @@ defmodule Synapse.Agent.ToolExecutionTest do
                event_sink(test_pid)
              )
 
-    refute_received {:run_event, %Event.ToolStarted{call_id: "call-read"}}
+    assert_receive {:run_event, %Event.ToolStarted{call_id: "call-read"}}
+    assert_receive {:run_event, %Event.ToolCompleted{call_id: "call-read", status: :ok}}
   end
 
   test "event sink failure before ToolStarted executes nothing" do

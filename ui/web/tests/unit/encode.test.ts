@@ -17,7 +17,6 @@ describe('protocol command encoding', () => {
       prompt: 'Inspect the project',
       cwd: '/tmp/project',
       model: 'model-a',
-      budget: { max_turns: 3, max_provider_retries: 0 },
       conversation: [
         { role: 'user', content: 'Earlier question' },
         { role: 'assistant', content: 'Earlier answer' },
@@ -39,7 +38,6 @@ describe('protocol command encoding', () => {
           prompt: 'Inspect the project',
           cwd: '/tmp/project',
           model: 'model-a',
-          budget: { max_turns: 3, max_provider_retries: 0 },
           conversation: [
             { role: 'user', content: 'Earlier question' },
             { role: 'assistant', content: 'Earlier answer' },
@@ -54,7 +52,6 @@ describe('protocol command encoding', () => {
           prompt: 'Inspect the project',
           cwd: '/tmp/project',
           model: 'model-a',
-          budget: { max_turns: 3, max_provider_retries: 0 },
           conversation: [
             { role: 'user', content: 'Earlier question' },
             { role: 'assistant', content: 'Earlier answer' },
@@ -69,13 +66,12 @@ describe('protocol command encoding', () => {
     }
   });
 
-  it('omits blank optional model and empty Budget', () => {
+  it('omits a blank optional model', () => {
     const result = encodeStartCommand({
       requestId: REQUEST_ID,
       prompt: 'Inspect',
       cwd: '/tmp/project',
       model: '   ',
-      budget: {},
     });
 
     expect(result.ok).toBe(true);
@@ -257,64 +253,6 @@ describe('protocol command encoding', () => {
       });
     },
   );
-
-  it('accepts every Budget boundary and rejects unknown, zero, unsafe, and excessive fields', () => {
-    expect(
-      encodeStartCommand({
-        requestId: REQUEST_ID,
-        prompt: 'Inspect',
-        cwd: '/tmp/project',
-        budget: {
-          max_turns: 100,
-          max_tool_calls: 500,
-          max_wall_time_ms: 3_600_000,
-          provider_inactivity_ms: 900_000,
-          tool_inactivity_ms: 900_000,
-          max_output_bytes: 524_288,
-          max_provider_retries: 0,
-        },
-      }).ok,
-    ).toBe(true);
-
-    for (const budget of [
-      { max_turns: 0 },
-      { max_provider_retries: -1 },
-      { max_provider_retries: 6 },
-      { max_turns: Number.MAX_SAFE_INTEGER + 1 },
-      { max_turns: 1.5 },
-      { capabilities: 1 },
-    ]) {
-      const result = encodeStartCommand({
-        requestId: REQUEST_ID,
-        prompt: 'Inspect',
-        cwd: '/tmp/project',
-        budget: budget as never,
-      });
-      expect(result).toMatchObject({ ok: false, error: { code: 'invalid_budget' } });
-    }
-  });
-
-  it('never reads inherited Budget values', () => {
-    Object.defineProperty(Object.prototype, 'max_turns', {
-      configurable: true,
-      value: 100,
-    });
-
-    try {
-      const result = encodeStartCommand({
-        requestId: REQUEST_ID,
-        prompt: 'Inspect',
-        cwd: '/tmp/project',
-        budget: {},
-      });
-      expect(result).toMatchObject({
-        ok: true,
-        command: { payload: { prompt: 'Inspect', cwd: '/tmp/project' } },
-      });
-    } finally {
-      delete (Object.prototype as { max_turns?: number }).max_turns;
-    }
-  });
 
   it.each([
     'run_short',

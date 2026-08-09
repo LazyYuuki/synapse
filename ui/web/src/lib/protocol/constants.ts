@@ -1,6 +1,6 @@
 /** @see ../../../../../docs/plan/PLAN-API.md */
 
-import type { AgentTerminalError, Budget, ServerErrorCode } from './types';
+import type { AgentTerminalError, ServerErrorCode } from './types';
 
 export const PROTOCOL_VERSION = 1 as const;
 export const DEFAULT_API_URL = 'ws://127.0.0.1:4848/v1/socket';
@@ -42,16 +42,6 @@ export const LIMITS = {
   protocolEntries: 500,
   protocolBytes: 1_048_576,
 } as const;
-
-export const BUDGET_LIMITS = {
-  max_turns: { min: 1, max: 100 },
-  max_tool_calls: { min: 1, max: 500 },
-  max_wall_time_ms: { min: 1, max: 3_600_000 },
-  provider_inactivity_ms: { min: 1, max: 900_000 },
-  tool_inactivity_ms: { min: 1, max: 900_000 },
-  max_output_bytes: { min: 1, max: HARD_CLIENT_MAX_OUTPUT_BYTES },
-  max_provider_retries: { min: 0, max: 5 },
-} as const satisfies Record<keyof Budget, { min: number; max: number }>;
 
 export const SERVER_ERROR_SPECS = {
   invalid_json: {
@@ -137,6 +127,7 @@ export const AGENT_REASONS = {
   provider: ['provider_failed', 'provider_interrupted_after_output', 'provider_retry_exhausted'],
   protocol: ['empty_provider_response', 'invalid_function_call_batch', 'tool_admission_failed'],
   tool: ['tool_ambiguous'],
+  context: ['token_limit_exceeded'],
   budget: [
     'turn_budget_exhausted',
     'tool_call_budget_exhausted',

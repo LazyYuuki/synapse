@@ -33,18 +33,9 @@ defmodule Synapse.API.Protocol do
   alias Synapse.Tool.Validation
 
   @envelope_keys MapSet.new(~w(payload request_id type version))
-  @start_keys MapSet.new(~w(budget conversation cwd model prompt))
+  @start_keys MapSet.new(~w(conversation cwd model prompt))
   @cancel_keys MapSet.new(~w(run_id))
   @subscribe_keys MapSet.new(~w(after_seq run_id))
-  @budget_fields %{
-    "max_turns" => :max_turns,
-    "max_tool_calls" => :max_tool_calls,
-    "max_wall_time_ms" => :max_wall_time_ms,
-    "provider_inactivity_ms" => :provider_inactivity_ms,
-    "tool_inactivity_ms" => :tool_inactivity_ms,
-    "max_output_bytes" => :max_output_bytes,
-    "max_provider_retries" => :max_provider_retries
-  }
 
   @typedoc "Stable decode classification; ordinary protocol codes become `server.error`."
   @type error_code ::
@@ -149,15 +140,14 @@ defmodule Synapse.API.Protocol do
 
   defp start(payload, config) do
     with true <- exact_optional_keys?(payload, @start_keys, ~w(cwd prompt)),
-         {:ok, model} <- selected_model(payload, config),
-         {:ok, budget} <- selected_budget(payload, config) do
+         {:ok, model} <- selected_model(payload, config) do
       Start.new(
         %{
           prompt: payload["prompt"],
           conversation: Map.get(payload, "conversation", []),
           cwd: payload["cwd"],
           model: model,
-          budget: budget
+          budget: config.budget
         },
         config
       )
@@ -174,27 +164,6 @@ defmodule Synapse.API.Protocol do
         else: {:error, :invalid_model}
     end
   end
-
-  defp selected_budget(payload, config) do
-    if Map.has_key?(payload, "budget") do
-      lower_budget(payload["budget"], config)
-    else
-      {:ok, config.budget}
-    end
-  end
-
-  defp lower_budget(budget, config) when is_map(budget) and not is_struct(budget) do
-    with true <-
-           MapSet.subset?(MapSet.new(Map.keys(budget)), MapSet.new(Map.keys(@budget_fields))),
-         true <- Enum.all?(budget, fn {_field, value} -> is_integer(value) end) do
-      attrs = Map.new(budget, fn {field, value} -> {Map.fetch!(@budget_fields, field), value} end)
-      Policy.lower_budget(config, attrs)
-    else
-      false -> {:error, :invalid_budget}
-    end
-  end
-
-  defp lower_budget(_budget, _config), do: {:error, :invalid_budget}
 
   defp cancel(payload, config) do
     if exact_keys?(payload, @cancel_keys),

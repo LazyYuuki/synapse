@@ -520,11 +520,11 @@ The terminal result is:
 }
 ```
 
-Event `data` and result `output` are arbitrary untrusted binaries that may contain secrets, project content, or absolute host paths. Limits count raw bytes before truncation; Workspace does not sanitize them, and Tool owns any UTF-8 replacement, escaping, redaction, persistence, or model-safe rendering. A chunk crossing the ceiling is clipped to the remaining raw-byte budget, the process is terminated, and no later output event is emitted.
+Event `data` and result `output` are arbitrary untrusted binaries that may contain secrets, project content, or absolute host paths. Retention policy counts raw bytes before truncation; Workspace does not sanitize them, and Tool owns any UTF-8 replacement, escaping, redaction, persistence, or model-safe rendering. A chunk crossing the retained prefix is clipped, later bytes are discarded, and the process continues to natural exit.
 
 `termination` is `:exited`, `:cancelled`, `:timed_out`, or `:output_limit`. Non-zero exits remain successful observations in `ProcessResult`. A Workspace error means the request or runner itself could not produce a trustworthy process result.
 
-Cancellation and timeout do not roll back subprocess filesystem effects. Every forced stop after a `mutation: :unknown` process starts, including cancellation, timeout, output limit, sink failure, coordinator death, or runner failure, therefore returns an ambiguous Workspace error even after the direct child stops. Read-only commands may return ordinary cancelled, timed-out, or output-limit ProcessResults.
+Cancellation and timeout do not roll back subprocess filesystem effects. Every forced stop after a `mutation: :unknown` process starts, including cancellation, timeout, sink failure, coordinator death, or runner failure, therefore returns an ambiguous Workspace error even after the direct child stops. Retained-output truncation is not a forced stop and preserves the natural exit status.
 
 ## Workspace Error Taxonomy
 
@@ -696,7 +696,7 @@ This reduces accidental inheritance; it is not host isolation. A child running a
 
 - [x] Confirm absolute executable plus separated argv as the Workspace command contract.
 - [x] Confirm Bash is an explicit Tool mapping rather than implicit Workspace parsing.
-- [x] Confirm arbitrary-binary combined output semantics, raw-byte accounting, and output-limit termination behavior.
+- [x] Confirm arbitrary-binary combined output semantics, raw-byte accounting, and nonterminal retention truncation.
 - [x] Confirm the minimal environment allowlist and private `HOME`/`TMPDIR` lifecycle.
 - [x] Spike raw Port and MuonTrap timeout, cancellation, caller death, and direct-child cleanup.
 - [x] Adopt MuonTrap 1.8.0 and record descendant-process limitations without Linux cgroups.
@@ -1110,7 +1110,7 @@ This reduces accidental inheritance; it is not host isolation. A child running a
 
 - [x] Return ordinary cancelled/timed-out/output-limit ProcessResult for declared read-only commands.
 - [x] Treat interrupted unknown-footprint commands as potentially ambiguous mutations.
-- [x] Treat sink failure, coordinator death, runner failure, and output limit after unknown process start as ambiguous.
+- [x] Treat sink failure, coordinator death, and runner failure after unknown process start as ambiguous.
 - [x] Never replay a cancelled or timed-out process automatically.
 - [x] Document direct-child, grandchild, daemon, VM-kill, and platform limitations.
 

@@ -8,7 +8,9 @@ defmodule Synapse.Workspace.ProcessSpec do
 
   `timeout_ms` bounds total execution. `inactivity_ms` independently bounds the
   interval between accepted output events. Process existence alone is not
-  meaningful activity.
+  meaningful activity. `max_output_bytes` bounds only the retained prefix exposed
+  to callers; additional output is acknowledged and discarded without stopping
+  the process, and the terminal Result records `truncated: true`.
   """
 
   alias Synapse.Workspace.{Limits, Validation}
@@ -209,10 +211,11 @@ defmodule Synapse.Workspace.ProcessResult do
   @moduledoc """
   The known terminal observation of one owned external command.
 
-  Non-zero exit remains a successful observation. Read-only cancellation,
-  timeout, and output-limit termination may also use this contract. Forced stop
-  of an unknown-footprint command is instead an ambiguous Workspace Error. Output
-  remains raw untrusted child data and may contain sensitive content or host paths.
+  Non-zero exit remains a successful observation. Read-only cancellation and
+  timeout may also use this contract. Retained-output truncation preserves the
+  natural exit and sets `truncated: true`. Forced stop of an unknown-footprint
+  command is instead an ambiguous Workspace Error. Output remains raw untrusted
+  child data and may contain sensitive content or host paths.
   """
 
   alias Synapse.Workspace.{Limits, Validation}
@@ -290,16 +293,10 @@ defmodule Synapse.Workspace.ProcessResult do
       bytes <= limits.max_process_output_bytes + limits.max_process_event_bytes
   end
 
-  defp valid_truncation?(%{
-         termination: :output_limit,
-         truncated: true,
-         output_bytes: bytes,
-         output: output
-       }),
-       do: bytes > byte_size(output)
+  defp valid_truncation?(%{truncated: true, output_bytes: bytes, output: output}),
+    do: bytes > byte_size(output)
 
   defp valid_truncation?(%{termination: :output_limit}), do: false
-  defp valid_truncation?(%{truncated: true}), do: false
 
   defp valid_truncation?(%{truncated: false, output_bytes: bytes, output: output}),
     do: bytes == byte_size(output)

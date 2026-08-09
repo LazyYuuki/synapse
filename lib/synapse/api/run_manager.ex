@@ -585,8 +585,13 @@ defmodule Synapse.API.RunManager do
 
     if event.turn == record.open_turn and event.operation_id == record.provider_operation_id and
          is_nil(record.projection.active_tool) and is_nil(record.owner_lost_tool) and
-         byte_size(text) <= config.max_projection_text_bytes and String.valid?(text) do
-      {:ok, %{record.projection | text: text}, %{}}
+         String.valid?(text) do
+      retained =
+        if byte_size(text) <= config.max_projection_text_bytes,
+          do: text,
+          else: record.projection.text
+
+      {:ok, %{record.projection | text: retained}, %{}}
     else
       :error
     end

@@ -104,7 +104,7 @@ defmodule Synapse.Workspace.ProcessRunnerTest do
     end)
   end
 
-  test "enforces exact and exceeded output ceilings under one accounting policy" do
+  test "retains a bounded output prefix without stopping the process" do
     in_temporary_directory(fn root ->
       {:ok, limits} = Limits.new(kill_grace_ms: 50)
       handle = open_workspace(root, limits)
@@ -120,19 +120,26 @@ defmodule Synapse.Workspace.ProcessRunnerTest do
 
       assert {:ok,
               %ProcessResult{
-                termination: :output_limit,
+                termination: :exited,
                 output: "1234567890",
                 output_bytes: 11,
                 truncated: true,
-                exit_code: nil
+                exit_code: 0
               }} =
                run(handle, "/usr/bin/printf", ["1234567890X"], max_output_bytes: 10)
 
-      assert {:error, %Error{kind: :ambiguous, reason: :output_limit, outcome: :unknown}} =
+      assert {:ok,
+              %ProcessResult{
+                termination: :exited,
+                output: "1234567890",
+                output_bytes: 11,
+                truncated: true,
+                exit_code: 7
+              }} =
                run(
                  handle,
                  "/bin/sh",
-                 ["-c", "printf 1234567890X; sleep 10"],
+                 ["-c", "printf 1234567890X; exit 7"],
                  mutation: :unknown,
                  max_output_bytes: 10
                )
@@ -154,10 +161,11 @@ defmodule Synapse.Workspace.ProcessRunnerTest do
 
       assert {:ok,
               %ProcessResult{
-                termination: :output_limit,
+                termination: :exited,
                 output: "",
                 output_bytes: output_bytes,
-                truncated: true
+                truncated: true,
+                exit_code: 0
               }} = run(handle, "/usr/bin/printf", ["data"], event_sink: sink)
 
       assert output_bytes > 0
@@ -914,16 +922,15 @@ defmodule Synapse.Workspace.ProcessRunnerTest do
     end)
   end
 
-  test "output-limit return and lease release follow TERM/KILL cleanup" do
+  test "truncated output waits for natural exit and releases the lease" do
     in_temporary_directory(fn root ->
       {:ok, limits} = Limits.new(kill_grace_ms: 50)
       handle = open_workspace(root, limits)
       pid_file = Elixir.Path.join(root, "output-limit.pid")
 
-      script =
-        "printf '%s' $$ > \"$1\"; trap '' TERM; printf 1234567890X; while :; do :; done"
+      script = "printf '%s' $$ > \"$1\"; printf 1234567890X"
 
-      assert {:ok, %ProcessResult{termination: :output_limit}} =
+      assert {:ok, %ProcessResult{termination: :exited, truncated: true, exit_code: 0}} =
                run(handle, "/bin/sh", ["-c", script, "sh", pid_file], max_output_bytes: 10)
 
       os_pid = pid_file |> File.read!() |> String.to_integer()
@@ -931,7 +938,7 @@ defmodule Synapse.Workspace.ProcessRunnerTest do
 
       File.rm!(pid_file)
 
-      assert {:error, %Error{kind: :ambiguous, reason: :output_limit, outcome: :unknown}} =
+      assert {:ok, %ProcessResult{termination: :exited, truncated: true, exit_code: 0}} =
                run(handle, "/bin/sh", ["-c", script, "sh", pid_file],
                  mutation: :unknown,
                  max_output_bytes: 10

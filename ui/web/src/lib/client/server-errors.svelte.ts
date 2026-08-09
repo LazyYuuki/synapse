@@ -35,7 +35,7 @@ export const SERVER_ERROR_GUIDANCE = {
     category: 'protocol',
   },
   invalid_payload: {
-    guidance: 'Server policy rejected the submitted fields. Review workspace, model, and Budget.',
+    guidance: 'Server policy rejected the submitted fields. Review workspace and model.',
     category: 'protocol',
   },
   token_limit_exceeded: {

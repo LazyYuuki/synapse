@@ -2,6 +2,7 @@ defmodule Synapse.Agent.ContextWindowTest do
   use ExUnit.Case, async: true
 
   alias Synapse.Agent.ContextWindow
+  alias Synapse.Provider.Request
   alias Synapse.Tool.Registry
 
   test "fixed estimate includes instructions, Tool schemas, envelope, and reserve" do
@@ -49,5 +50,39 @@ defmodule Synapse.Agent.ContextWindowTest do
     assert {:error, :invalid_fixed_context} = ContextWindow.fixed_input_tokens("ok", %{})
     assert {:error, :invalid_dynamic_context} = ContextWindow.estimate_tokens([], <<255>>, 1)
     assert {:error, :invalid_dynamic_context} = ContextWindow.estimate_tokens([], "ok", 0)
+    assert {:error, :invalid_provider_request} = ContextWindow.estimate_request_tokens(%{})
+  end
+
+  test "estimates every complete Provider request before transport" do
+    assert {:ok, request} =
+             Request.new(
+               model: "model-a",
+               instructions: "Work carefully",
+               input_items: [
+                 %{
+                   "type" => "message",
+                   "role" => "user",
+                   "content" => [%{"type" => "input_text", "text" => "Inspect"}]
+                 }
+               ],
+               tools: Registry.specifications()
+             )
+
+    assert {:ok, tokens} = ContextWindow.estimate_request_tokens(request)
+    assert tokens > 0
+    assert tokens < ContextWindow.max_input_tokens()
+
+    [message] = request.input_items
+    [content] = message["content"]
+
+    oversized = %{
+      request
+      | input_items: [
+          %{message | "content" => [%{content | "text" => String.duplicate("x", 816_000)}]}
+        ]
+    }
+
+    assert {:ok, oversized_tokens} = ContextWindow.estimate_request_tokens(oversized)
+    assert oversized_tokens > ContextWindow.max_input_tokens()
   end
 end

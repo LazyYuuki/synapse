@@ -134,7 +134,7 @@ Client commands are:
 
 | Type            | Payload                                                                                 | Purpose                                           |
 | --------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `run.start`     | required `prompt`, absolute `cwd`; optional allowlisted `model`, lowering-only `budget` | reserve and start the one active run              |
+| `run.start`     | required `prompt`, absolute `cwd`; optional allowlisted `model` and completed conversation | reserve and start the one active run              |
 | `run.cancel`    | server-issued `run_id`                                                                  | record idempotent cancellation intent             |
 | `run.subscribe` | `run_id`; optional non-negative signed-64-bit `after_seq`                               | obtain snapshot, reset, or retained replay        |
 | `ping`          | exact empty object                                                                      | keep an idle connection active and receive `pong` |
@@ -224,14 +224,14 @@ callback running in Bandit's connection process, not a separately supervised wor
 1. Router validates Host, route, query, forbidden headers, Origin, upgrade shape,
    and key, then passes Socket only an authority-free policy.
 2. Protocol bounds encoded bytes and the decoded JSON tree, requires the exact v1
-   envelope, validates prompt, absolute `cwd`, allowlisted model, and lowering-only
-   Budget, and constructs an internal `Command.Start`.
+   envelope, validates prompt, absolute `cwd`, allowlisted model, and completed
+   conversation, and constructs an internal `Command.Start`.
 3. Manager assigns the random server run ID, atomically reserves the one active run,
    subscribes the calling Socket at cursor zero, and starts a temporary RunSession.
 4. Socket sends `run.accepted` before any continuation can deliver progress.
 5. RunSession reconstructs a fresh trusted CapabilitySet and Runtime Options from
-   Config, lowers Budget again, and constructs `Synapse.Run.Request` with the server
-   run ID before calling Runtime.
+   Config and constructs `Synapse.Run.Request` with the server run ID before calling
+   Runtime.
 
 Prompt and `cwd` are client content, not opaque authority. `cwd` chooses an absolute
 root under the cooperative same-user policy; only trusted Config decides whether
@@ -318,7 +318,7 @@ the conditions that lose some or all replay. Listener loss is explicitly not one
 
 | Direction        | Allowed content                                                                                                                                                                                                                | Authority that must not cross                                                                                                                                                     |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| client to server | request ID, prompt, absolute `cwd`, optional allowlisted model, lowering-only seven-field Budget, server-issued run ID, replay cursor, empty ping payload                                                                      | credentials, capability booleans/sets, Provider modules, instructions, callbacks, sinks, openers, Runtime Options, Workspace/Tool limits, handles, PIDs, references, functions    |
+| client to server | request ID, prompt, absolute `cwd`, optional allowlisted model and completed conversation, server-issued run ID, replay cursor, empty ping payload                                                                          | credentials, capability booleans/sets, Provider modules, instructions, callbacks, sinks, openers, Runtime Options, Workspace/Tool limits, handles, PIDs, references, functions    |
 | server to client | protocol/replay mode, launch `cwd`, run ID/status, configured model, run/turn/tool/Provider identifiers, text deltas, bounded projection/counters, public Tool status/metadata, five-field Result, closed sanitized Agent/Runtime/API errors | Provider `final_response`, Runtime Run, Workspace Handle, Config, callbacks, raw exceptions/stacktraces/process reasons, decoder internals, credentials or authorization material |
 
 The launch `cwd` appears only in `server.hello`; a command-selected `cwd` is not
@@ -361,11 +361,10 @@ be a canonical integer in `1..524288`. An enabled API requires an explicit defau
 model from trusted configuration or `SYNAPSE_MODEL`; allowlist order never selects
 a model.
 
-Production capabilities enable read, write, and same-user process execution.
-They cannot be supplied to `lower_budget/2`, which accepts only the seven known
-Budget atoms and rejects values above server policy. Runtime Provider, fixed
-instructions, Workspace/Tool limits, callbacks, and opener remain inside a
-validated, inspect-redacted `Synapse.Runtime.Options`.
+Production capabilities enable read, write, and same-user process execution. They
+cannot be supplied through `run.start`. Runtime Provider, fixed instructions,
+Workspace/Tool limits, callbacks, and opener remain inside a validated,
+inspect-redacted `Synapse.Runtime.Options`.
 
 The hard-limit fields and protected resources are:
 

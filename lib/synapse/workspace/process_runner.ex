@@ -552,6 +552,7 @@ defmodule Synapse.Workspace.ProcessRunner do
         output: [],
         retained_bytes: 0,
         observed_bytes: 0,
+        truncated: false,
         started_at: started_at,
         coordinator: coordinator,
         coordinator_monitor: coordinator_monitor,
@@ -600,7 +601,7 @@ defmodule Synapse.Workspace.ProcessRunner do
         handle_data(state, data, spec, limits, progress, emit_event)
 
       {port, {:exit_status, status}} when port == state.port ->
-        process_result(state, spec, limits, :exited, status, false)
+        process_result(state, spec, limits, :exited, status, state.truncated)
 
       {:DOWN, monitor, :process, coordinator, _reason}
       when monitor == state.coordinator_monitor and coordinator == state.coordinator ->
@@ -616,7 +617,6 @@ defmodule Synapse.Workspace.ProcessRunner do
   end
 
   defp handle_data(state, data, spec, limits, progress, emit_event) do
-    total = state.retained_bytes + byte_size(data)
     output_bytes = spec.max_output_bytes - state.retained_bytes
     event_slots = max(limits.max_process_events - 1 - state.sequence, 0)
     event_bytes = event_slots * limits.max_process_event_bytes
@@ -630,14 +630,16 @@ defmodule Synapse.Workspace.ProcessRunner do
         receive_port(state, spec, limits, progress, emit_event)
 
       {:ok, state} ->
-        observed = min(total, spec.max_output_bytes + limits.max_process_event_bytes)
-        state = %{state | observed_bytes: observed}
-        progress.(state)
+        observed =
+          min(
+            state.observed_bytes + byte_size(data) - accepted_bytes,
+            spec.max_output_bytes + limits.max_process_event_bytes
+          )
 
-        case stop_port(state, limits.kill_grace_ms) do
-          :ok -> output_limit_result(state, spec, limits)
-          :error -> exit(:process_cleanup_unconfirmed)
-        end
+        state = %{state | observed_bytes: observed, truncated: true}
+        progress.(state)
+        report_bytes_handled(state, byte_size(data))
+        receive_port(state, spec, limits, progress, emit_event)
 
       {:error, reason} ->
         case stop_port(state, limits.kill_grace_ms) do
@@ -713,12 +715,6 @@ defmodule Synapse.Workspace.ProcessRunner do
       limits
     )
   end
-
-  defp output_limit_result(state, %{mutation: :read_only} = spec, limits),
-    do: process_result(state, spec, limits, :output_limit, nil, true)
-
-  defp output_limit_result(_state, %{mutation: :unknown}, _limits),
-    do: {:error, :output_limit, :unknown}
 
   defp interrupted_result(
          :cancelled,

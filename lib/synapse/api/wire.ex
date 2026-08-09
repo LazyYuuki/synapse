@@ -95,6 +95,7 @@ defmodule Synapse.API.Wire do
     provider: "provider",
     protocol: "protocol",
     tool: "tool",
+    context: "context",
     budget: "budget",
     cancelled: "cancelled"
   }
@@ -114,6 +115,7 @@ defmodule Synapse.API.Wire do
     invalid_function_call_batch: "invalid_function_call_batch",
     tool_admission_failed: "tool_admission_failed",
     tool_ambiguous: "tool_ambiguous",
+    token_limit_exceeded: "token_limit_exceeded",
     turn_budget_exhausted: "turn_budget_exhausted",
     tool_call_budget_exhausted: "tool_call_budget_exhausted",
     wall_time_budget_exhausted: "wall_time_budget_exhausted",

@@ -23,8 +23,7 @@ defmodule Synapse.API.ProtocolTest do
                       {"role": "assistant", "content": "A project."}
                     ],
                     "cwd": "/tmp/project",
-                    "model": "model-a",
-                    "budget": {"max_turns": 10, "max_provider_retries": 1}
+                    "model": "model-a"
                   }
                }),
                config
@@ -39,8 +38,7 @@ defmodule Synapse.API.ProtocolTest do
 
     assert start.cwd == "/tmp/project"
     assert start.model == "model-a"
-    assert start.budget.max_turns == 10
-    assert start.budget.max_provider_retries == 1
+    assert start.budget == config.budget
 
     assert {:ok, {"request-cancel", %Cancel{run_id: ^run_id}}} =
              Protocol.decode(
@@ -193,37 +191,11 @@ defmodule Synapse.API.ProtocolTest do
     assert {:close, :message_too_big} = Protocol.decode(message, config)
   end
 
-  test "every Budget field may be omitted, lowered, or equal but never widened" do
+  test "run.start rejects the removed aggregate Budget field" do
     config = config()
-    fields = Map.from_struct(config.budget)
 
-    Enum.each(fields, fn {field, server_value} ->
-      wire_field = Atom.to_string(field)
-      omitted = fields |> Map.delete(field) |> stringify_keys()
-
-      assert {:ok, {_, %Start{budget: inherited}}} =
-               decode_start(start_payload(%{"budget" => omitted}), config)
-
-      assert Map.fetch!(inherited, field) == server_value
-
-      lower_value = lower_value(field, server_value)
-
-      assert {:ok, {_, %Start{budget: lowered}}} =
-               decode_start(start_payload(%{"budget" => %{wire_field => lower_value}}), config)
-
-      assert Map.fetch!(lowered, field) == lower_value
-
-      assert {:ok, {_, %Start{budget: equal}}} =
-               decode_start(start_payload(%{"budget" => %{wire_field => server_value}}), config)
-
-      assert Map.fetch!(equal, field) == server_value
-
-      assert {:error, :invalid_payload, "request-1"} =
-               decode_start(
-                 start_payload(%{"budget" => %{wire_field => server_value + 1}}),
-                 config
-               )
-    end)
+    assert {:error, :invalid_payload, "request-1"} =
+             decode_start(start_payload(%{"budget" => %{"max_turns" => 20}}), config)
   end
 
   test "rejects malformed JSON and exact-envelope violations with safe correlation" do
@@ -611,11 +583,6 @@ defmodule Synapse.API.ProtocolTest do
 
   defp start_payload(extra \\ %{}),
     do: Map.merge(%{"prompt" => "Inspect", "cwd" => "/tmp/project"}, extra)
-
-  defp stringify_keys(map), do: Map.new(map, fn {key, value} -> {Atom.to_string(key), value} end)
-
-  defp lower_value(:max_provider_retries, value), do: max(value - 1, 0)
-  defp lower_value(_field, value), do: max(value - 1, 1)
 
   defp object_with_keys(count),
     do: Map.new(1..count, fn ordinal -> {"key-#{ordinal}", ordinal} end)

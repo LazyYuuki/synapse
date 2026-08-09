@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatElapsedTime } from '../client/elapsed-time';
   import type { RunState } from '../client/run-types';
   import type { ServerErrorNotice } from '../client/server-errors.svelte';
 
@@ -11,6 +12,7 @@
     heading?: string;
     announcement?: string;
     terminal?: boolean;
+    conclusionTime?: string;
     activeTool?: boolean;
     collapsible?: boolean;
   };
@@ -188,6 +190,10 @@
                 ? 'Run interrupted: Runtime lost. Final cleanup settlement was not observed.'
                 : `Run ${terminal.status}: ${terminal.error.message}`,
           terminal: true,
+          conclusionTime:
+            terminal.status === 'completed' && state.lastTurnDurationMs !== null
+              ? formatElapsedTime(state.lastTurnDurationMs)
+              : undefined,
         });
       }
     }
@@ -274,6 +280,14 @@
             {#if item.heading}<h3>{item.heading}</h3>{/if}
             {#if item.announcement}
               <p role={item.kind === 'error' ? 'alert' : 'status'}>{item.announcement}</p>
+            {/if}
+            {#if item.conclusionTime}
+              <dl class="terminal-metrics">
+                <div>
+                  <dt>Conclusion time</dt>
+                  <dd>{item.conclusionTime}</dd>
+                </div>
+              </dl>
             {/if}
             {#if item.kind === 'assistant'}
               <div

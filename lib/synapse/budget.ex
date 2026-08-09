@@ -1,42 +1,25 @@
 defmodule Synapse.Budget do
   @moduledoc """
-  Validated aggregate resource policy for one Agent run.
+  Legacy validated policy envelope retained at internal Run boundaries.
 
-  Budget is trusted local configuration created before `Synapse.Agent.Runner`
-  starts. It bounds logical turns, admitted Tool calls, wall time, Provider and
-  Tool inactivity, model-visible output added to conversation, and safe
-  pre-output Provider retries. Lower components retain their own hard limits;
-  Budget may lower effective policy but cannot enlarge those limits.
+  Aggregate values remain in the struct while internal callers migrate, but
+  `Synapse.Agent.Runner` no longer treats turn, Tool-call, wall-time, output, or
+  retry values as execution ceilings. Those dimensions are accounting only.
 
-  `max_provider_retries` is the only field that accepts zero, allowing retry to
-  be disabled. All arithmetic consumers must remain within signed 64-bit
-  monotonic-time and counter ranges.
+  Current execution safety is owned by the component that can enforce it:
 
-  Fields:
+  * every complete Provider request is checked against the 272,000-token context
+    limit before transport;
+  * Runtime may supply an explicit absolute deadline, but the default is
+    `:infinity`;
+  * Provider transport owns per-attempt inactivity handling;
+  * Tool and Workspace policy own Bash timeout, inactivity, and retained-output
+    truncation.
 
-  * `max_turns` bounds logical model turns, excluding retries of one snapshot;
-  * `max_tool_calls` bounds admitted executions across the run;
-  * `max_wall_time_ms` bounds total monotonic run lifetime;
-  * `provider_inactivity_ms` lowers silence allowed in each Provider attempt;
-  * `tool_inactivity_ms` lowers silence allowed in applicable Tool processes;
-  * `max_output_bytes` bounds aggregate model-visible data added to conversation;
-  * `max_provider_retries` bounds additional safe attempts before any output.
-
-  | Field | Unit | Default | Protected aggregate resource |
-  | --- | ---: | ---: | --- |
-  | `max_turns` | logical turns | 20 | immutable Provider request snapshots |
-  | `max_tool_calls` | executions | 50 | admitted Tool side effects |
-  | `max_wall_time_ms` | milliseconds | 900,000 | monotonic run lifetime |
-  | `provider_inactivity_ms` | milliseconds | 120,000 | silence within one Provider attempt |
-  | `tool_inactivity_ms` | milliseconds | 180,000 | silence within applicable Tool processes |
-  | `max_output_bytes` | UTF-8/canonical JSON bytes | 524,288 | newly projected model-visible output |
-  | `max_provider_retries` | additional attempts | 2 | safe pre-output Provider retries |
-
-  Provider and Tool contracts retain independent hard ceilings. Budget can lower
-  those limits for one run but cannot enlarge them. A Provider retry reuses one
-  immutable logical-turn request, so it increments `max_provider_retries` rather
-  than `max_turns`. Tool-call budget admission is whole-batch and atomic: a batch
-  that does not fit starts no Tool operation.
+  The loopback API no longer accepts client Budget fields. `max_output_bytes`
+  remains in server configuration temporarily as a transport/projection sizing
+  value, not as an Agent run termination policy. Counters remain signed-64 values
+  so event and wire representations stay well-defined.
 
   ## Example
 
@@ -69,7 +52,7 @@ defmodule Synapse.Budget do
 
   defstruct Map.to_list(@defaults)
 
-  @typedoc "Trusted immutable aggregate ceilings for one run."
+  @typedoc "Legacy immutable policy values carried across internal run contracts."
   @type t :: %__MODULE__{
           max_turns: pos_integer(),
           max_tool_calls: pos_integer(),
@@ -86,11 +69,11 @@ defmodule Synapse.Budget do
           | {:unknown_fields, [term()]}
           | {atom(), :must_be_in_recorded_range}
 
-  @doc "Returns the confirmed Agent Loop aggregate defaults."
+  @doc "Returns the legacy internal policy defaults."
   @spec default() :: t()
   def default, do: struct!(__MODULE__, @defaults)
 
-  @doc "Validates trusted lowering and constructs one Budget."
+  @doc "Validates and constructs the legacy internal policy envelope."
   @spec new(keyword() | map()) :: {:ok, t()} | {:error, validation_error()}
   def new(attrs \\ %{}) do
     with {:ok, attrs} <- attributes(attrs),

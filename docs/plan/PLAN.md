@@ -14,7 +14,7 @@ TOKAMAK_API_KEY="..." SYNAPSE_MODEL="..." mix synapse.server
 
 Web, TUI, or desktop client
   -> ws://127.0.0.1:4848/v1/socket
-  -> run.start(prompt, cwd, optional model and budget lowering)
+  -> run.start(prompt, cwd, optional model and conversation)
   -> ordered run events
   -> one structured run terminal
 ```
@@ -205,19 +205,14 @@ progress events.
 }
 ```
 
-### Budget
+### Run Accounting
 
-```elixir
-%Synapse.Budget{
-  max_turns: 20,
-  max_tool_calls: 50,
-  max_wall_time_ms: 900_000,
-  provider_inactivity_ms: 120_000,
-  tool_inactivity_ms: 180_000,
-  max_output_bytes: 524_288,
-  max_provider_retries: 2
-}
-```
+Turns, Tool calls, Provider retries, and model-visible bytes are accounting
+counters, not run ceilings. Every complete Provider request is admitted against
+the 272,000-token context limit. After each 20 completed turns, the next Provider
+request receives a transient instruction to assess progress, stop and ask for
+specific help when stuck, or continue with a concrete next step. Bash duration,
+inactivity, and output remain bounded by Tool and Workspace policy.
 
 Every shared contract must have a documented purpose, constructor or validation path, type definition, and clear ownership.
 
@@ -686,10 +681,10 @@ GenServer or to surrender conversation ownership.
 build immutable turn request
   -> Provider.stream
   -> collect message output
-  -> provider error: evaluate retryable and output_started independently
-  -> output_started: stop without transparent replay
-  -> retryable and no output: apply higher-layer safe retry policy
-  -> non-retryable and no output: fail with the classified error
+  -> provider error: classify transient versus permanent failure
+  -> transient and fewer than ten retries: replay the immutable request
+  -> transient at retry limit: fail with provider_retry_exhausted
+  -> permanent failure: fail with the classified error
   -> final text and no tools: complete
   -> incomplete tool calls: fail without execution
   -> complete tool calls: execute sequentially
@@ -707,15 +702,13 @@ build immutable turn request
 - The next request sends projected conversation input rather than relying on Tokamak account-specific server state.
 - Context compaction is not part of the MVP.
 
-### Budget Rules
+### Continuation Rules
 
-- Maximum turns.
-- Maximum total tool calls.
-- Maximum wall time.
-- Maximum aggregate model-visible Provider and Tool Result output.
-- Maximum safe provider retries before any output.
-
-Budget exhaustion is a structured terminal state, not an exception or an invitation to loop again.
+- Admit every complete Provider request against the 272,000-token context limit.
+- Count turns, Tool calls, output bytes, and safe retries without aggregate ceilings.
+- Add a transient progress assessment after every 20 completed turns.
+- Keep Bash timeout, inactivity, and output bounds in Tool and Workspace policy.
+- Honor cancellation and any explicit Runtime deadline before later work.
 
 ### Tests
 
@@ -815,9 +808,9 @@ Agent applies semantic Provider retry policy from
 run lifetime, cancellation source, and earlier deadline policy; it must preserve
 these replay constraints rather than independently retrying Runner or a request.
 
-- Connect, TLS, 429, and retryable 5xx failures may retry only before provider output.
-- The MVP allows at most two safe provider retries.
-- A partial provider stream is not replayed transparently.
+- Connect, TLS, 429, retryable 5xx, timeout, and interrupted streams may retry.
+- Each immutable Provider Request allows at most ten additional attempts.
+- Partial Provider progress can be replayed, but only a complete Response may authorize Tools.
 - A mutating tool is not automatically retried.
 - An ambiguous mutation terminates the run.
 - Fresh worktree attempt retries are post-MVP.

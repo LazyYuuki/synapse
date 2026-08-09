@@ -1,6 +1,6 @@
 defmodule Synapse.Agent.ContextWindow do
   @moduledoc """
-  Conservative model-input estimation for API admission.
+  Conservative model-input estimation for API admission and every Provider call.
 
   Synapse has no model tokenizer or remote count endpoint, so admission estimates
   tokens as canonical Provider request JSON bytes divided by three and rounded up.
@@ -70,6 +70,23 @@ defmodule Synapse.Agent.ContextWindow do
 
   def estimate_tokens(_conversation, _prompt, _fixed_input_tokens),
     do: {:error, :invalid_dynamic_context}
+
+  @doc "Estimates one complete Provider request using its canonical Responses JSON."
+  @spec estimate_request_tokens(Synapse.Provider.Request.t()) ::
+          {:ok, pos_integer()} | {:error, :invalid_provider_request}
+  def estimate_request_tokens(%Synapse.Provider.Request{} = request) do
+    with {:ok, encoded} <- Synapse.Provider.ResponsesCodec.encode(request) do
+      {:ok, encoded |> JSON.encode!() |> byte_size() |> tokens_for_bytes()}
+    else
+      {:error, _reason} -> {:error, :invalid_provider_request}
+    end
+  rescue
+    _exception -> {:error, :invalid_provider_request}
+  catch
+    _kind, _reason -> {:error, :invalid_provider_request}
+  end
+
+  def estimate_request_tokens(_request), do: {:error, :invalid_provider_request}
 
   defp conversation_input(%{"role" => "user", "content" => content}),
     do: user_input(content)

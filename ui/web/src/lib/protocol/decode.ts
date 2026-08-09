@@ -749,7 +749,7 @@ function decodeAgentError(value: Record<string, unknown>): AgentTerminalError | 
   const reasons: readonly string[] = AGENT_REASONS[kind];
   if (!reasons.includes(value.reason)) return invalid;
 
-  const turn = readInteger(value.turn, 0, 100);
+  const turn = readInteger(value.turn, 0, Number.MAX_SAFE_INTEGER);
   const details = decodeAgentDetails(value.details);
   if (
     turn === undefined ||
@@ -778,6 +778,8 @@ function decodeAgentError(value: Record<string, unknown>): AgentTerminalError | 
       return { ...base, kind, reason: value.reason as AgentReason<'protocol'> };
     case 'tool':
       return { ...base, kind, reason: value.reason as AgentReason<'tool'> };
+    case 'context':
+      return { ...base, kind, reason: value.reason as AgentReason<'context'> };
     case 'budget':
       return { ...base, kind, reason: value.reason as AgentReason<'budget'> };
     case 'cancelled':

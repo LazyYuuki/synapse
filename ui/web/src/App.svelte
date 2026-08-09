@@ -6,22 +6,14 @@
     type ClientControllerFactory,
     type ClientControllers,
   } from './lib/client/client.svelte';
-  import {
-    BUDGET_FIELDS,
-    emptyBudgetDraft,
-    validateComposerDraft,
-    type ComposerError,
-  } from './lib/client/composer';
+  import { validateComposerDraft, type ComposerError } from './lib/client/composer';
   import type { ConnectionLifecycle } from './lib/client/connection.svelte';
+  import { formatElapsedTime } from './lib/client/elapsed-time';
   import type { RunState } from './lib/client/run-types';
   import ChatTimeline from './lib/components/ChatTimeline.svelte';
   import ProtocolInspector from './lib/components/ProtocolInspector.svelte';
-  import {
-    BUDGET_LIMITS,
-    DEFAULT_API_URL,
-    HARD_CLIENT_MAX_OUTPUT_BYTES,
-  } from './lib/protocol/constants';
-  import type { Budget, RunStatus } from './lib/protocol/types';
+  import { DEFAULT_API_URL } from './lib/protocol/constants';
+  import type { RunStatus } from './lib/protocol/types';
 
   let {
     createClient = createBrowserClientControllers,
@@ -32,7 +24,6 @@
   let cwd = $state('');
   let model = $state('');
   let prompt = $state('');
-  let budget = $state(emptyBudgetDraft());
   let composerError = $state<ComposerError | null>(null);
   let actionNotice = $state<string | null>(null);
   let startRequestId = $state<string | null>(null);
@@ -46,17 +37,6 @@
   );
   let handledReadyGeneration = 0;
   let workspaceManuallyEdited = false;
-  let serverMaxOutputBytes = $state(HARD_CLIENT_MAX_OUTPUT_BYTES);
-
-  const budgetLabels: Record<keyof Budget, string> = {
-    max_turns: 'Maximum turns',
-    max_tool_calls: 'Maximum Tool calls',
-    max_wall_time_ms: 'Wall time',
-    provider_inactivity_ms: 'Provider inactivity',
-    tool_inactivity_ms: 'Tool inactivity',
-    max_output_bytes: 'Output bytes',
-    max_provider_retries: 'Provider retries',
-  };
 
   onMount(() => {
     client = createClient();
@@ -69,7 +49,7 @@
       startRequestId = null;
       prompt = '';
       composerError = null;
-      actionNotice = 'Run accepted. Prompt cleared; workspace, model, and Budget remain in memory.';
+      actionNotice = 'Run accepted. Prompt cleared; workspace and model remain in memory.';
       void focusCurrentRun();
     } else if (startRequestId && client?.errors.notice?.command === 'start') {
       startRequestId = null;
@@ -100,9 +80,6 @@
     const generation = client?.connection.generation ?? 0;
     if (!hello || generation === handledReadyGeneration) return;
     handledReadyGeneration = generation;
-    serverMaxOutputBytes = hello.payload.max_output_bytes;
-    if (composerError?.field === 'max_output_bytes') composerError = null;
-
     const currentCwd = untrack(() => cwd);
     if (currentCwd === '' || !workspaceManuallyEdited) {
       cwd = hello.payload.cwd;
@@ -144,10 +121,7 @@
     if (!client) return;
     composerError = null;
     actionNotice = null;
-    const validated = validateComposerDraft(
-      { prompt, cwd, model, budget },
-      client.connection.hello?.payload.max_output_bytes ?? serverMaxOutputBytes,
-    );
+    const validated = validateComposerDraft({ prompt, cwd, model });
     if (!validated.ok) {
       composerError = validated.error;
       void focusComposerError(validated.error.field);
@@ -244,35 +218,20 @@
     return 'Cancellation requests intent only; the terminal message confirms settlement.';
   }
 
-  function budgetDescription(field: keyof Budget): string {
-    const limits =
-      field === 'max_output_bytes'
-        ? { min: BUDGET_LIMITS.max_output_bytes.min, max: serverMaxOutputBytes }
-        : BUDGET_LIMITS[field];
-    const suffix = field.endsWith('_ms') ? ' ms' : '';
-    return `${limits.min.toLocaleString()}-${limits.max.toLocaleString()}${suffix}`;
-  }
-
   function clearComposerError(field: ComposerError['field']): void {
     if (composerError?.field === field) composerError = null;
   }
 
   async function focusComposerError(field: ComposerError['field']): Promise<void> {
     await tick();
-    const id =
-      field === 'cwd'
-        ? 'workspace'
-        : field === 'prompt' || field === 'model'
-          ? field
-          : `budget-${field}`;
+    const id = field === 'cwd' ? 'workspace' : field;
     document.getElementById(id)?.focus();
   }
 
   function composerFieldLabel(field: ComposerError['field']): string {
     if (field === 'cwd') return 'Workspace path';
     if (field === 'prompt') return 'Prompt';
-    if (field === 'model') return 'Model';
-    return budgetLabels[field];
+    return 'Model';
   }
 
   function serverErrorHeading(category: string): string {
@@ -324,6 +283,16 @@
       not_found: 'Run no longer retained',
       protocol_fault: 'Run synchronization fault',
     }[state];
+  }
+
+  function turnElapsedLabel(): string {
+    if (!current) return '--';
+    if (current.turnStartedAt !== null) {
+      return `${formatElapsedTime(performance.now() - current.turnStartedAt)} running`;
+    }
+    return current.lastTurnDurationMs === null
+      ? '--'
+      : formatElapsedTime(current.lastTurnDurationMs);
   }
 
   function currentRun(value: ClientControllers | null): RunState | null {
@@ -536,32 +505,6 @@
               disabled={client?.connection.pendingStart}></textarea>
           </div>
 
-          <details class="budget-disclosure">
-            <summary>Advanced budget limits</summary>
-            <p>Optional protocol ceilings. The server may enforce lower configured values.</p>
-            <div class="budget-grid">
-              {#each BUDGET_FIELDS as field (field)}
-                <div class="budget-field">
-                  <label for={`budget-${field}`}>{budgetLabels[field]}</label>
-                  <input
-                    id={`budget-${field}`}
-                    name={field}
-                    type="text"
-                    inputmode="numeric"
-                    bind:value={budget[field]}
-                    oninput={() => clearComposerError(field)}
-                    placeholder="Server default"
-                    aria-describedby={`budget-${field}-help${composerError?.field === field ? ' composer-error' : ''}`}
-                    aria-invalid={composerError?.field === field}
-                    autocomplete="off"
-                    disabled={client?.connection.pendingStart}
-                  />
-                  <small id={`budget-${field}-help`}>{budgetDescription(field)}</small>
-                </div>
-              {/each}
-            </div>
-          </details>
-
           {#if composerError}<span id="composer-error" class="visually-hidden"
               >{composerError.message}</span
             >{/if}
@@ -644,6 +587,10 @@
           <div>
             <dt>Output bytes</dt>
             <dd>{current?.projection.outputBytes ?? '--'}</dd>
+          </div>
+          <div>
+            <dt>Turn elapsed</dt>
+            <dd>{turnElapsedLabel()}</dd>
           </div>
         </dl>
 

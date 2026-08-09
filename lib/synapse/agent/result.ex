@@ -13,7 +13,7 @@ defmodule Synapse.Agent.Result do
   Fields retain run identity, joined final text, the authoritative completed
   Provider Response, logical turn count, executed Tool-call count, safe Provider
   retry count, and aggregate output bytes. Counters are validated against the
-  Phase 0 hard ceilings, and output bytes must include final text bytes.
+  signed accounting range, and output bytes must include final text bytes.
 
   ## Example
 
@@ -44,9 +44,6 @@ defmodule Synapse.Agent.Result do
 
   @max_run_id_bytes 256
   @max_text_bytes 4_194_304
-  @max_turns 100
-  @max_tool_calls 500
-  @max_provider_retries 5
   @allowed_fields [
     :run_id,
     :text,
@@ -95,10 +92,10 @@ defmodule Synapse.Agent.Result do
            bounded_text?(attrs[:text]) or
              {:error, {:text, :must_be_bounded_non_empty_utf8_string}},
          {:ok, response} <- normalize_response(attrs[:final_response]),
-         :ok <- range(:turns, attrs[:turns], 1, @max_turns),
-         :ok <- range(:tool_calls, attrs[:tool_calls], 0, @max_tool_calls),
-         :ok <- range(:provider_retries, attrs[:provider_retries], 0, @max_provider_retries),
-         :ok <- range(:output_bytes, attrs[:output_bytes], 0, @max_text_bytes),
+         :ok <- counter(:turns, attrs[:turns], 1),
+         :ok <- counter(:tool_calls, attrs[:tool_calls], 0),
+         :ok <- counter(:provider_retries, attrs[:provider_retries], 0),
+         :ok <- counter(:output_bytes, attrs[:output_bytes], 0),
          true <-
            attrs[:output_bytes] >= byte_size(attrs[:text]) or
              {:error, {:output_bytes, :must_include_final_text}} do
@@ -121,11 +118,11 @@ defmodule Synapse.Agent.Result do
       is_binary(text) and byte_size(text) <= @max_text_bytes and String.valid?(text) and
         String.trim(text) != ""
 
-  defp range(_field, value, minimum, maximum)
-       when is_integer(value) and value >= minimum and value <= maximum,
+  defp counter(_field, value, minimum)
+       when is_integer(value) and value >= minimum and value <= 9_223_372_036_854_775_807,
        do: :ok
 
-  defp range(field, _value, _minimum, _maximum),
+  defp counter(field, _value, _minimum),
     do: {:error, {field, :must_be_in_recorded_range}}
 end
 

@@ -108,6 +108,7 @@ defmodule Synapse.API.Socket do
     "provider" => :provider,
     "protocol" => :protocol,
     "tool" => :tool,
+    "context" => :context,
     "budget" => :budget,
     "cancelled" => :cancelled
   }
@@ -126,6 +127,7 @@ defmodule Synapse.API.Socket do
     "invalid_function_call_batch" => :invalid_function_call_batch,
     "tool_admission_failed" => :tool_admission_failed,
     "tool_ambiguous" => :tool_ambiguous,
+    "token_limit_exceeded" => :token_limit_exceeded,
     "turn_budget_exhausted" => :turn_budget_exhausted,
     "tool_call_budget_exhausted" => :tool_call_budget_exhausted,
     "wall_time_budget_exhausted" => :wall_time_budget_exhausted,
@@ -601,11 +603,10 @@ defmodule Synapse.API.Socket do
          policy
        ),
        do:
-         map_size(result) == 5 and bounded_string?(text, false, policy.budget.max_output_bytes) and
-           positive_counter?(turns) and turns <= policy.budget.max_turns and counter?(tool_calls) and
-           tool_calls <= policy.budget.max_tool_calls and counter?(provider_retries) and
-           provider_retries <= policy.budget.max_provider_retries and counter?(output_bytes) and
-           output_bytes <= policy.budget.max_output_bytes and output_bytes >= byte_size(text)
+         map_size(result) == 5 and
+           bounded_string?(text, false, policy.max_projection_text_bytes) and
+           positive_counter?(turns) and counter?(tool_calls) and counter?(provider_retries) and
+           counter?(output_bytes) and output_bytes >= byte_size(text)
 
   defp valid_result_payload?(_result, _policy), do: false
 

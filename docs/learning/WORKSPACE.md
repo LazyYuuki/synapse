@@ -440,15 +440,15 @@ Workspace.run caller
 not assumed UTF-8, and may be sensitive because a command can print project data.
 Each event is bounded and sequences are contiguous. The coordinator records the
 same accepted bytes used in `ProcessResult.output`; only then does the Port worker
-acknowledge MuonTrap and reopen its native stdio window. Crossing the output limit
-retains and emits only the remaining prefix, stops the command, and reports one
-bounded observed overshoot.
+acknowledge MuonTrap and reopen its native stdio window. Crossing the retained
+output allowance emits only the remaining prefix, discards later bytes, and lets
+the command run to natural exit. The Result reports `truncated: true`.
 
 Natural zero, non-zero, and signal exits are successful `ProcessResult`
 observations. A Workspace Error instead means start, sink, containment, access, or
 coordination failed. Forced stop of a trusted `:read_only` command can return a
-known timed-out or output-limit result. Forced stop of `mutation: :unknown` is
-ambiguous because the command may already have changed files.
+known timed-out result. Forced stop of `mutation: :unknown` is ambiguous because
+the command may already have changed files.
 
 Read-only process permits can coexist with reads and file mutation leases. They
 are reserved for trusted fixed commands because read-only behavior is not
