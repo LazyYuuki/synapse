@@ -40,18 +40,23 @@ end
 defmodule Synapse.API.Command.Start do
   @moduledoc false
 
+  alias Synapse.Agent.ContextWindow
   alias Synapse.API.Policy
   alias Synapse.Budget
+  alias Synapse.Run.Request
   alias Synapse.Tool.Validation
 
   @max_cwd_bytes 4_096
-  @allowed_fields [:prompt, :cwd, :model, :budget]
+  @max_input_tokens ContextWindow.max_input_tokens()
+  @required_fields [:prompt, :cwd, :model, :budget]
+  @allowed_fields @required_fields ++ [:conversation]
 
-  @enforce_keys [:prompt, :cwd, :model, :budget]
-  defstruct @enforce_keys
+  @enforce_keys @required_fields
+  defstruct @required_fields ++ [conversation: []]
 
   @type t :: %__MODULE__{
           prompt: String.t(),
+          conversation: [Synapse.Run.Request.conversation_message()],
           cwd: String.t(),
           model: String.t(),
           budget: Synapse.Budget.t()
@@ -61,9 +66,11 @@ defmodule Synapse.API.Command.Start do
   def new(attrs, config) do
     with true <- Policy.valid?(config) or {:error, {:config, :must_be_valid}},
          {:ok, attrs} <- Validation.attributes(attrs, @allowed_fields),
+         {:ok, conversation} <- normalize_conversation(Map.get(attrs, :conversation, [])),
          true <-
            Validation.bounded_non_empty_string?(attrs[:prompt], config.max_prompt_bytes) or
              {:error, {:prompt, :must_be_bounded_non_empty_string}},
+         :ok <- admit_context(conversation, attrs[:prompt], config),
          true <- valid_cwd?(attrs[:cwd]) or {:error, {:cwd, :must_be_absolute_path}},
          true <-
            attrs[:model] in config.model_allowlist or {:error, {:model, :must_be_allowlisted}},
@@ -73,6 +80,7 @@ defmodule Synapse.API.Command.Start do
       {:ok,
        %__MODULE__{
          prompt: attrs.prompt,
+         conversation: conversation,
          cwd: attrs.cwd,
          model: attrs.model,
          budget: attrs.budget
@@ -85,6 +93,32 @@ defmodule Synapse.API.Command.Start do
     do: match?({:ok, %__MODULE__{}}, new(Map.from_struct(command), config))
 
   def valid?(_command, _config), do: false
+
+  defp normalize_conversation(conversation) do
+    case Request.normalize_conversation(conversation) do
+      {:ok, conversation} ->
+        {:ok, conversation}
+
+      {:error, _reason} ->
+        {:error, {:conversation, :must_be_bounded_complete_user_assistant_pairs}}
+    end
+  end
+
+  defp admit_context(conversation, prompt, config) do
+    case ContextWindow.estimate_tokens(conversation, prompt, config.fixed_input_tokens) do
+      {:ok, tokens} when tokens <= config.max_input_tokens ->
+        :ok
+
+      {:ok, tokens} when tokens > @max_input_tokens ->
+        {:error, {:context_window, :token_limit_exceeded}}
+
+      {:ok, _tokens} ->
+        {:error, {:context_window, :configured_limit_exceeded}}
+
+      {:error, _reason} ->
+        {:error, {:context_window, :must_be_estimable}}
+    end
+  end
 
   defp valid_cwd?(cwd),
     do:

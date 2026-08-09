@@ -10,6 +10,7 @@ export type ServerErrorNotice = {
   retryable: boolean;
   category: ServerErrorCategory;
   command: CommandKind | null;
+  trace: Extract<ServerMessage, { type: 'server.error' }>;
 };
 
 export const SERVER_ERROR_GUIDANCE = {
@@ -35,6 +36,10 @@ export const SERVER_ERROR_GUIDANCE = {
   },
   invalid_payload: {
     guidance: 'Server policy rejected the submitted fields. Review workspace, model, and Budget.',
+    category: 'protocol',
+  },
+  token_limit_exceeded: {
+    guidance: 'This message would exceed the 272,000-token application context limit.',
     category: 'protocol',
   },
   run_busy: {
@@ -75,6 +80,7 @@ export function createServerErrorNotices() {
       retryable: message.payload.retryable,
       category: fixed.category,
       command: context.correlation?.kind ?? null,
+      trace: message,
     };
   }
 

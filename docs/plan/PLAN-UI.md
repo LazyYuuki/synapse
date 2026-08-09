@@ -1061,7 +1061,7 @@ run subscriptions cannot accumulate against the per-connection limit.
 ### Tool Activity
 
 - [x] Show one active Tool card with name, ordinal, turn, and status.
-- [x] Never show Tool arguments because the API does not expose them.
+- [x] Show exact decoded Tool arguments now exposed by the API.
 - [x] Show completed Tool activity from bounded events with public status/outcome.
 - [x] Do not infer file changes, command output, or success beyond wire fields.
 
@@ -1376,9 +1376,12 @@ frontend gates introduced by that commit.
 - [x] The app uses Svelte 5 runes, strict TypeScript, and Vite without SvelteKit.
 - [x] Synapse serves no frontend assets and imports no frontend dependency.
 - [x] Browser connects directly to the validated loopback protocol-v1 endpoint.
-- [x] A user can start one run with prompt and absolute workspace path.
+- [x] A user can continue one visible chat across independently settled runs.
+- [x] Completed pairs are sent as bounded structured history with each follow-up.
 - [x] Optional model and Budget values can only narrow existing server policy.
 - [x] Streamed text, Tool activity, counters, cancellation, and terminal are visible.
+- [x] Provider, Tool call, Tool Result, answer, settlement, and error bubbles expose
+      accessible exact validated trace disclosures.
 - [x] Disconnect and page unload never cancel the run.
 - [x] Reconnect produces contiguous retained replay or authoritative reset.
 - [x] Page reload can restore a retained run through no-cursor snapshot without

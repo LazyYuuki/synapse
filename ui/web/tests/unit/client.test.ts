@@ -65,6 +65,68 @@ describe('composed client controls', () => {
       'run.subscribe',
     ]);
   });
+
+  it('archives a completed run and sends it as bounded history with a follow-up', () => {
+    const context = acceptedClient();
+    expect(context.client.run.current?.start?.payload.prompt).toBe('Inspect');
+    context.socket.emitMessage(
+      serverEnvelope('run.terminal', null, {
+        run_id: RUN_ID,
+        seq: 1,
+        status: 'completed',
+        result: {
+          text: 'First answer',
+          turns: 1,
+          tool_calls: 0,
+          provider_retries: 0,
+          output_bytes: 12,
+        },
+        error: null,
+      }),
+    );
+
+    expect(context.client.canStartRun).toBe(true);
+    const followUp = context.client.startRun({ prompt: 'Continue', cwd: '/tmp/project' });
+    expect(followUp.ok).toBe(true);
+    expect(JSON.parse(context.socket.sent.at(-1) ?? '{}')).toMatchObject({
+      type: 'run.start',
+      payload: {
+        prompt: 'Continue',
+        conversation: [
+          { role: 'user', content: 'Inspect' },
+          { role: 'assistant', content: 'First answer' },
+        ],
+      },
+    });
+    expect(context.client.run.current).toBeNull();
+    expect(context.client.run.runs).toHaveLength(1);
+  });
+
+  it('retains the settled run when local follow-up encoding fails', () => {
+    const context = acceptedClient();
+    context.socket.emitMessage(
+      serverEnvelope('run.terminal', null, {
+        run_id: RUN_ID,
+        seq: 1,
+        status: 'completed',
+        result: {
+          text: 'First answer',
+          turns: 1,
+          tool_calls: 0,
+          provider_retries: 0,
+          output_bytes: 12,
+        },
+        error: null,
+      }),
+    );
+
+    expect(context.client.startRun({ prompt: '', cwd: '/tmp/project' })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_prompt' },
+    });
+    expect(context.client.run.current?.runId).toBe(RUN_ID);
+    expect(context.client.run.runs).toHaveLength(1);
+  });
 });
 
 function readyClient() {

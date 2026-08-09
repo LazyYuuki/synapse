@@ -129,7 +129,7 @@ describe('interactive operator console', () => {
     expect(screen.getByLabelText(/Prompt/)).toHaveValue('');
     expect(screen.getByLabelText(/Workspace path/)).toHaveValue('/tmp/project');
     expect(screen.getByLabelText(/Model/)).toHaveValue('model-a');
-    expect(screen.getByText(RUN_ID)).toBeInTheDocument();
+    expect(screen.getAllByText(RUN_ID)).not.toHaveLength(0);
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Current run' }));
     expect(context.storage.values.get('synapse.run_id')).toBe(RUN_ID);
     expect(screen.getByRole('button', { name: 'Start run' })).toBeDisabled();
@@ -208,10 +208,10 @@ describe('interactive operator console', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Run interrupted: Runtime lost');
     expect(document.querySelector('.run-state')).toHaveAttribute('aria-live', 'off');
     expect(document.querySelector('.run-sync-state')).toHaveAttribute('aria-live', 'off');
-    expect(screen.getByText(/final cleanup settlement was not observed/)).toBeInTheDocument();
+    expect(screen.getAllByText(/final cleanup settlement was not observed/i)).not.toHaveLength(0);
     expect(screen.getByRole('button', { name: 'New run' })).toBeEnabled();
     await fireEvent.click(screen.getByRole('button', { name: 'New run' }));
-    expect(screen.getByText('Not assigned')).toBeInTheDocument();
+    expect(screen.getAllByText('Not assigned')).not.toHaveLength(0);
     await tick();
     expect(document.activeElement).toBe(screen.getByLabelText(/Workspace path/));
     expect(context.socket.closes).toEqual([1_000]);
@@ -272,6 +272,7 @@ describe('interactive operator console', () => {
         call_id: 'call-1',
         name: 'read',
         ordinal: 1,
+        arguments: { path: 'mix.exs' },
       },
     ];
     for (const [index, event] of events.entries()) {
@@ -287,8 +288,9 @@ describe('interactive operator console', () => {
     });
     expect(output.querySelector('strong')).toBeNull();
     const activeTool = screen.getByRole('region', { name: 'Active Tool' });
-    expect(within(activeTool).getByText('read')).toBeInTheDocument();
-    expect(within(activeTool).getByText('Active')).toBeInTheDocument();
+    expect(within(activeTool).getByText(/Tool call \/ read/)).toBeInTheDocument();
+    expect(within(activeTool).getByText(/^Active/)).toBeInTheDocument();
+    expect(activeTool).toHaveAttribute('open');
 
     context.socket.emitMessage(
       serverEnvelope('run.event', null, {
@@ -303,8 +305,15 @@ describe('interactive operator console', () => {
           ordinal: 1,
           status: 'ok',
           metadata: { tool: 'read', outcome: 'completed' },
+          content: '{"content":"example"}',
         },
       }),
+    );
+    await tick();
+    expect(screen.queryByRole('region', { name: 'Active Tool' })).not.toBeInTheDocument();
+    expect(screen.getByText(/Tool call \/ read/).closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText(/Tool result \/ read \/ ok/).closest('details')).not.toHaveAttribute(
+      'open',
     );
     context.socket.emitMessage(
       serverEnvelope('run.event', null, {
@@ -321,7 +330,7 @@ describe('interactive operator console', () => {
       }),
     );
     await tick();
-    expect(screen.getAllByText(/outcome completed/)).toHaveLength(2);
+    expect(screen.getByText(/Turn completed/)).toBeInTheDocument();
     output.focus();
 
     context.socket.emitMessage(

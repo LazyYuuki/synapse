@@ -33,7 +33,7 @@ defmodule Synapse.API.Protocol do
   alias Synapse.Tool.Validation
 
   @envelope_keys MapSet.new(~w(payload request_id type version))
-  @start_keys MapSet.new(~w(budget cwd model prompt))
+  @start_keys MapSet.new(~w(budget conversation cwd model prompt))
   @cancel_keys MapSet.new(~w(run_id))
   @subscribe_keys MapSet.new(~w(after_seq run_id))
   @budget_fields %{
@@ -54,6 +54,7 @@ defmodule Synapse.API.Protocol do
           | :unknown_type
           | :invalid_request_id
           | :invalid_payload
+          | :token_limit_exceeded
           | :internal_error
 
   @typedoc "A typed command, sanitized protocol error, or close-only size violation."
@@ -104,9 +105,17 @@ defmodule Synapse.API.Protocol do
          {:ok, typed} <- Command.new(decoded["request_id"], command, config) do
       {:ok, typed}
     else
-      {:error, code, correlation} -> {:error, code, correlation}
-      {:error, _reason} -> {:error, :invalid_payload, request_id}
-      false -> {:error, :invalid_payload, request_id}
+      {:error, code, correlation} ->
+        {:error, code, correlation}
+
+      {:error, {:context_window, :token_limit_exceeded}} ->
+        {:error, :token_limit_exceeded, request_id}
+
+      {:error, _reason} ->
+        {:error, :invalid_payload, request_id}
+
+      false ->
+        {:error, :invalid_payload, request_id}
     end
   end
 
@@ -143,7 +152,13 @@ defmodule Synapse.API.Protocol do
          {:ok, model} <- selected_model(payload, config),
          {:ok, budget} <- selected_budget(payload, config) do
       Start.new(
-        %{prompt: payload["prompt"], cwd: payload["cwd"], model: model, budget: budget},
+        %{
+          prompt: payload["prompt"],
+          conversation: Map.get(payload, "conversation", []),
+          cwd: payload["cwd"],
+          model: model,
+          budget: budget
+        },
         config
       )
     end

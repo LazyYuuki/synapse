@@ -131,6 +131,7 @@ defmodule Synapse.MixProject do
           Synapse.Run.Event.RunInterrupted,
           Synapse.Agent,
           Synapse.Agent.Context,
+          Synapse.Agent.ContextWindow,
           Synapse.Agent.State,
           Synapse.Agent.Result,
           Synapse.Agent.Error,

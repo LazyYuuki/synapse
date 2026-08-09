@@ -530,6 +530,10 @@ terminal, and subscription wakeup output use `null` unless they are the immediat
   "prompt": "Inspect the project and verify the requested change.",
   "cwd": "/absolute/path/to/project",
   "model": "configured-model",
+  "conversation": [
+    {"role": "user", "content": "Earlier request"},
+    {"role": "assistant", "content": "Earlier answer"}
+  ],
   "budget": {
     "max_turns": 10,
     "max_tool_calls": 20,
@@ -542,7 +546,9 @@ terminal, and subscription wakeup output use `null` unless they are the immediat
 }
 ```
 
-`prompt` and absolute `cwd` are required. `model` and `budget` are optional.
+`prompt` and absolute `cwd` are required. `model`, `budget`, and `conversation` are optional.
+Conversation is a complete alternating sequence beginning with user and ending with
+assistant. It is bounded to 128 messages and 1,572,864 aggregate UTF-8 content bytes.
 Budget may contain any subset of the seven exact fields. Every supplied value
 must be an integer in the Budget contract and less than or equal to server
 policy. Unknown fields are rejected. The payload cannot contain `run_id`,
@@ -636,6 +642,7 @@ unsupported_version
 unknown_type
 invalid_request_id
 invalid_payload
+token_limit_exceeded
 run_busy
 run_not_found
 invalid_cursor
@@ -654,6 +661,7 @@ Codes have fixed response policy:
 | `unknown_type`        | `Command type is not supported`         | `false`   |
 | `invalid_request_id`  | `Request ID is invalid`                 | `false`   |
 | `invalid_payload`     | `Command payload is invalid`            | `false`   |
+| `token_limit_exceeded` | `Estimated input exceeds the 272000 token context limit` | `false` |
 | `run_busy`            | `A run is already active`               | `true`    |
 | `run_not_found`       | `Run was not found`                     | `false`   |
 | `invalid_cursor`      | `Run cursor is invalid`                 | `false`   |
@@ -670,6 +678,11 @@ sanitized and may close with 1011 when connection state is no longer safe.
 `runtime_unavailable` is a command error only when reservation or RunSession
 admission fails before `run.accepted`. A typed Runtime start error after acceptance
 is exposed as that run's terminal.
+
+Before Runtime starts, API admission conservatively estimates the canonical Provider
+request as JSON bytes divided by three and rejects totals above 272,000 estimated
+input tokens with correlated `token_limit_exceeded`. Fixed instructions, Tool
+schemas, structured history, and the current prompt all contribute to this limit.
 
 ## Snapshot And Replay Contract
 
@@ -794,8 +807,8 @@ The explicit mapping is:
 | `RunStarted`                                 | `run.started`: `model`                                                                        |
 | `TurnStarted`                                | `turn.started`: `turn`, `operation_id`                                                        |
 | `TextDelta`                                  | `text.delta`: `turn`, `operation_id`, `item_id`, `content_index`, `delta`                     |
-| `ToolStarted`                                | `tool.started`: `turn`, `operation_id`, `call_id`, `name`, `ordinal`                          |
-| `ToolCompleted`                              | `tool.completed`: previous Tool fields plus string `status` and allowlisted `metadata`        |
+| `ToolStarted`                                | `tool.started`: `turn`, `operation_id`, `call_id`, `name`, `ordinal`, exact decoded `arguments` |
+| `ToolCompleted`                              | `tool.completed`: previous identity fields plus `status`, allowlisted `metadata`, and exact model-visible `content` |
 | `TurnCompleted`                              | `turn.completed`: `turn`, string `outcome`, `provider_attempts`, `tool_calls`, `output_bytes` |
 | `RunCompleted`                               | retained as pending terminal, not encoded as `run.event`                                      |
 | `RunFailed`                                  | retained as pending terminal, not encoded as `run.event`                                      |

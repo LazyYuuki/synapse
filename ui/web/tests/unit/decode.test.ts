@@ -207,6 +207,7 @@ describe('protocol server-message decoding', () => {
           call_id: 'c'.repeat(callBytes),
           name: 't'.repeat(nameBytes),
           ordinal: 1,
+          arguments: {},
         },
       });
 
@@ -225,6 +226,164 @@ describe('protocol server-message decoding', () => {
       toolFrame(LIMITS.callIdBytes, LIMITS.toolNameBytes + 1),
     ]) {
       expect(decodeServerMessage(frame)).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_message' },
+      });
+    }
+  });
+
+  it('decodes Tool arguments at exact canonical JSON, entry, and depth boundaries', () => {
+    const fixed = JSON.stringify({ value: '' });
+    const atByteLimit = { value: 'x'.repeat(LIMITS.toolArgumentBytes - fixed.length) };
+    const atEntryLimit = Object.fromEntries(
+      Array.from({ length: LIMITS.toolArgumentEntries }, (_, index) => [`key-${index}`, index]),
+    );
+    const atDepthLimit = { a: { b: { c: { d: {} } } } };
+    const frame = (arguments_: object) =>
+      serverEnvelope('run.event', null, {
+        run_id: RUN_ID,
+        seq: 1,
+        event: {
+          type: 'tool.started',
+          turn: 1,
+          operation_id: 'tool-op-1',
+          call_id: 'call-1',
+          name: 'read',
+          ordinal: 1,
+          arguments: arguments_,
+        },
+      });
+
+    expect(new TextEncoder().encode(JSON.stringify(atByteLimit)).byteLength).toBe(
+      LIMITS.toolArgumentBytes,
+    );
+    for (const arguments_ of [atByteLimit, atEntryLimit, atDepthLimit]) {
+      expect(decodeServerMessage(frame(arguments_))).toMatchObject({ ok: true });
+    }
+  });
+
+  it.each([
+    ['canonical JSON bytes', { value: 'x'.repeat(LIMITS.toolArgumentBytes - 11) }],
+    [
+      'aggregate entries',
+      Object.fromEntries(
+        Array.from({ length: LIMITS.toolArgumentEntries + 1 }, (_, index) => [
+          `key-${index}`,
+          index,
+        ]),
+      ),
+    ],
+    ['collection depth', { a: { b: { c: { d: { e: {} } } } } }],
+  ])('rejects Tool arguments over the %s limit', (_label, arguments_) => {
+    const message = serverEnvelope('run.event', null, {
+      run_id: RUN_ID,
+      seq: 1,
+      event: {
+        type: 'tool.started',
+        turn: 1,
+        operation_id: 'tool-op-1',
+        call_id: 'call-1',
+        name: 'read',
+        ordinal: 1,
+        arguments: arguments_,
+      },
+    });
+    expect(decodeServerMessage(message)).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_message' },
+    });
+  });
+
+  it.each(['9007199254740992', '-9007199254740992', '1e0'])(
+    'rejects malicious Tool argument numeric token %s',
+    (token) => {
+      const message = serverEnvelope('run.event', null, {
+        run_id: RUN_ID,
+        seq: 1,
+        event: {
+          type: 'tool.started',
+          turn: 1,
+          operation_id: 'tool-op-1',
+          call_id: 'call-1',
+          name: 'read',
+          ordinal: 1,
+          arguments: null,
+        },
+      }).replace('"arguments":null', `"arguments":{"value":${token}}`);
+
+      expect(decodeServerMessage(message)).toMatchObject({
+        ok: false,
+        error: { code: 'invalid_message' },
+      });
+    },
+  );
+
+  it('preserves malicious-looking Tool argument keys without prototype mutation', () => {
+    const message = serverEnvelope('run.event', null, {
+      run_id: RUN_ID,
+      seq: 1,
+      event: {
+        type: 'tool.started',
+        turn: 1,
+        operation_id: 'tool-op-1',
+        call_id: 'call-1',
+        name: 'read',
+        ordinal: 1,
+        arguments: null,
+      },
+    }).replace('"arguments":null', '"arguments":{"__proto__":{"polluted":true}}');
+
+    expect(decodeServerMessage(message)).toEqual({ ok: true, message: JSON.parse(message) });
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  it('enforces exact Tool event fields and UTF-8 completion content bytes', () => {
+    const started = (arguments_: unknown, extra: Record<string, unknown> = {}) =>
+      serverEnvelope('run.event', null, {
+        run_id: RUN_ID,
+        seq: 1,
+        event: {
+          type: 'tool.started',
+          turn: 1,
+          operation_id: 'tool-op-1',
+          call_id: 'call-1',
+          name: 'read',
+          ordinal: 1,
+          arguments: arguments_,
+          ...extra,
+        },
+      });
+    const completed = (content: unknown, extra: Record<string, unknown> = {}) =>
+      serverEnvelope('run.event', null, {
+        run_id: RUN_ID,
+        seq: 1,
+        event: {
+          type: 'tool.completed',
+          turn: 1,
+          operation_id: 'tool-op-1',
+          call_id: 'call-1',
+          name: 'read',
+          ordinal: 1,
+          status: 'ok',
+          metadata: { tool: 'read' },
+          content,
+          ...extra,
+        },
+      });
+    const atLimit = 'é'.repeat(LIMITS.toolContentBytes / 2);
+
+    expect(decodeServerMessage(started({ path: 'mix.exs' })).ok).toBe(true);
+    expect(decodeServerMessage(completed(atLimit)).ok).toBe(true);
+    for (const message of [
+      started([], {}),
+      started(undefined),
+      started({}, { extra: true }),
+      completed(`${atLimit}x`),
+      completed(42),
+      completed(undefined),
+      completed('', { arguments: {} }),
+    ]) {
+      expect(decodeServerMessage(message)).toMatchObject({
         ok: false,
         error: { code: 'invalid_message' },
       });

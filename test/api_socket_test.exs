@@ -178,6 +178,39 @@ defmodule Synapse.API.SocketTest do
     assert closed.violations == 9
   end
 
+  test "token admission failure returns a stable correlated error before RunManager starts" do
+    config = config()
+    harness = start_manager(config)
+    state = socket_state(harness.manager, config)
+    content = String.duplicate("x", 500_000)
+
+    conversation = [
+      %{"role" => "user", "content" => content},
+      %{"role" => "assistant", "content" => content}
+    ]
+
+    assert {:push, {:text, encoded}, next} =
+             Socket.handle_in(
+               {start_command("context-too-large", conversation: conversation), opcode: :text},
+               state
+             )
+
+    assert decode(encoded) == %{
+             "version" => 1,
+             "type" => "server.error",
+             "request_id" => "context-too-large",
+             "payload" => %{
+               "code" => "token_limit_exceeded",
+               "message" => "Estimated input exceeds the 272000 token context limit",
+               "retryable" => false
+             }
+           }
+
+    assert next.violations == state.violations + 1
+    assert :sys.get_state(harness.manager).active_run_id == nil
+    refute_received {:session_started, _session, _run_id}
+  end
+
   test "start and cancel route typed commands with exact request correlation" do
     config = config()
     harness = start_manager(config)
@@ -870,6 +903,97 @@ defmodule Synapse.API.SocketTest do
     end)
   end
 
+  test "pull validation accepts exact Tool boundaries and rejects malformed Tool keys, trees, and limits" do
+    config = config()
+    run_id = run_id(603)
+    argument_padding = 64_000 - byte_size(JSON.encode!(%{"value" => ""}))
+    arguments = %{"value" => String.duplicate("x", argument_padding)}
+    content = String.duplicate("c", 64_000)
+
+    {:ok, started} =
+      Event.new(
+        :tool_started,
+        tool_event_attrs(run_id) |> Map.put(:arguments, arguments)
+      )
+
+    {:ok, completed} =
+      Event.new(
+        :tool_completed,
+        tool_event_attrs(run_id)
+        |> Map.merge(%{status: :ok, metadata: %{}, content: content})
+      )
+
+    {:ok, started_frame} = Synapse.API.Wire.event(run_id, 1, started, config)
+    {:ok, completed_frame} = Synapse.API.Wire.event(run_id, 2, completed, config)
+
+    {:ok, manager} =
+      ReplyManager.start_link(self(), fn
+        {:pull, ^run_id, 0} ->
+          {:ok, %{messages: [started_frame, completed_frame], cursor: 2, more?: false}}
+
+        _message ->
+          {:error, :internal_error}
+      end)
+
+    state = socket_state(manager, config)
+    state = %{state | cursors: %{run_id => 0}}
+
+    assert {:push, [{:text, ^started_frame}, {:text, ^completed_frame}], accepted} =
+             Socket.handle_info({:synapse_run_changed, run_id}, state)
+
+    assert accepted.cursors[run_id] == 2
+
+    base_started = %{
+      "type" => "tool.started",
+      "turn" => 1,
+      "operation_id" => "tool-op",
+      "call_id" => "call-1",
+      "name" => "read",
+      "ordinal" => 1,
+      "arguments" => %{}
+    }
+
+    too_deep = Enum.reduce(1..6, %{}, fn index, nested -> %{"level-#{index}" => nested} end)
+    oversized = %{"value" => String.duplicate("x", 64_000)}
+
+    malformed_events = [
+      Map.delete(base_started, "arguments"),
+      Map.put(base_started, "extra", "authority"),
+      Map.put(base_started, "arguments", too_deep),
+      Map.put(base_started, "arguments", oversized),
+      %{
+        "type" => "tool.completed",
+        "turn" => 1,
+        "operation_id" => "tool-op",
+        "call_id" => "call-1",
+        "name" => "read",
+        "ordinal" => 1,
+        "status" => "ok",
+        "metadata" => %{},
+        "content" => content <> "x"
+      }
+    ]
+
+    Enum.each(malformed_events, fn malformed_event ->
+      frame = async_event_frame(run_id, 1, malformed_event)
+
+      {:ok, manager} =
+        ReplyManager.start_link(self(), fn
+          {:pull, ^run_id, 0} ->
+            {:ok, %{messages: [frame], cursor: 1, more?: false}}
+
+          _message ->
+            {:error, :internal_error}
+        end)
+
+      invalid_state = socket_state(manager, config)
+      invalid_state = %{invalid_state | cursors: %{run_id => 0}}
+
+      assert {:stop, :normal, 1011, ^invalid_state} =
+               Socket.handle_info({:synapse_run_changed, run_id}, invalid_state)
+    end)
+  end
+
   test "malformed asynchronous reset mode closes without advancing the cursor" do
     config = config()
     run_id = run_id(602)
@@ -1051,10 +1175,18 @@ defmodule Synapse.API.SocketTest do
   end
 
   defp start_command(request_id, options \\ []) do
-    command("run.start", request_id, %{
+    payload = %{
       "prompt" => Keyword.get(options, :prompt, "Inspect"),
       "cwd" => Keyword.get(options, :cwd, "/tmp/project")
-    })
+    }
+
+    payload =
+      case Keyword.fetch(options, :conversation) do
+        {:ok, conversation} -> Map.put(payload, "conversation", conversation)
+        :error -> payload
+      end
+
+    command("run.start", request_id, payload)
   end
 
   defp event(:run_started, attrs) do
@@ -1064,6 +1196,26 @@ defmodule Synapse.API.SocketTest do
   defp event(kind, attrs) do
     {:ok, event} = Event.new(kind, attrs)
     event
+  end
+
+  defp tool_event_attrs(run_id) do
+    %{
+      run_id: run_id,
+      turn: 1,
+      operation_id: "tool-op",
+      call_id: "call-1",
+      name: "read",
+      ordinal: 1
+    }
+  end
+
+  defp async_event_frame(run_id, seq, event) do
+    JSON.encode!(%{
+      "version" => 1,
+      "type" => "run.event",
+      "request_id" => nil,
+      "payload" => %{"run_id" => run_id, "seq" => seq, "event" => event}
+    })
   end
 
   defp agent_result(run_id, text) do

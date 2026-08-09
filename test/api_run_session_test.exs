@@ -28,13 +28,20 @@ defmodule Synapse.API.RunSessionTest do
       )
 
     harness = start_harness(config)
-    command = start_command(config, budget: command_budget)
+
+    conversation = [
+      %{"role" => "user", "content" => "Earlier question"},
+      %{"role" => "assistant", "content" => "Earlier answer"}
+    ]
+
+    command = start_command(config, budget: command_budget, conversation: conversation)
 
     assert {:ok, run_id} = RunManager.start_run(harness.manager, command)
 
     assert_receive {:runtime_start, session, start_ref, request, sink, options}
     assert request.id == run_id
     assert request.prompt == command.prompt
+    assert request.conversation == command.conversation
     assert request.cwd == command.cwd
     assert request.model == command.model
     assert request.budget == command_budget
@@ -556,6 +563,7 @@ defmodule Synapse.API.RunSessionTest do
   defp start_command(config, overrides \\ []) do
     attrs = %{
       prompt: Keyword.get(overrides, :prompt, "Inspect"),
+      conversation: Keyword.get(overrides, :conversation, []),
       cwd: Keyword.get(overrides, :cwd, "/tmp/project"),
       model: "model-a",
       budget: Keyword.get(overrides, :budget, config.budget)

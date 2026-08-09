@@ -552,26 +552,50 @@ function decodeEvent(value: ParsedJson): RunEvent | typeof invalid {
 }
 
 function decodeToolStarted(value: Record<string, unknown>): RunEvent | typeof invalid {
-  if (!hasExactKeys(value, ['type', ...activeToolKeys])) return invalid;
+  if (!hasExactKeys(value, ['type', ...activeToolKeys, 'arguments'])) return invalid;
   const tool = decodeActiveToolFields(value);
-  if (tool === invalid) return invalid;
-  return { type: 'tool.started', ...tool };
+  const arguments_ = decodeToolArguments(value.arguments);
+  if (tool === invalid || arguments_ === invalid) return invalid;
+  return { type: 'tool.started', ...tool, arguments: arguments_ };
 }
 
 function decodeToolCompleted(value: Record<string, unknown>): RunEvent | typeof invalid {
-  if (!hasExactKeys(value, ['type', ...activeToolKeys, 'status', 'metadata'])) return invalid;
+  if (!hasExactKeys(value, ['type', ...activeToolKeys, 'status', 'metadata', 'content'])) {
+    return invalid;
+  }
   const tool = decodeActiveToolFields(value);
   if (
     tool === invalid ||
     !isOneOf(value.status, ['ok', 'error', 'ambiguous'] as const) ||
-    !isPlainObject(value.metadata)
+    !isPlainObject(value.metadata) ||
+    !isBoundedString(value.content, LIMITS.toolContentBytes)
   ) {
     return invalid;
   }
 
   const metadata = decodeToolMetadata(value.metadata, tool.name);
   if (metadata === invalid) return invalid;
-  return { type: 'tool.completed', ...tool, status: value.status, metadata };
+  return {
+    type: 'tool.completed',
+    ...tool,
+    status: value.status,
+    metadata,
+    content: value.content,
+  };
+}
+
+function decodeToolArguments(value: unknown): JsonObject | typeof invalid {
+  if (!isPlainObject(value) || encodedJsonBytes(value) > LIMITS.toolArgumentBytes) return invalid;
+  const normalized = normalizeJsonValue(
+    value,
+    0,
+    { entries: 0 },
+    LIMITS.toolArgumentEntries,
+    LIMITS.toolArgumentDepth,
+  );
+  return normalized === invalid || !isPlainObject(normalized)
+    ? invalid
+    : (normalized as JsonObject);
 }
 
 function decodeActiveToolFields(value: Record<string, unknown>): ActiveTool | typeof invalid {
@@ -818,7 +842,14 @@ function decodeAgentDetails(value: unknown): JsonObject | typeof invalid {
   if (!isPlainObject(value)) return invalid;
   if (encodedJsonBytes(value) > LIMITS.agentDetailsBytes) return invalid;
   const counters = { entries: 0 };
-  const normalized = normalizeDetailValue(value, 0, counters);
+  const normalized = normalizeJsonValue(
+    value,
+    0,
+    counters,
+    LIMITS.agentDetailsEntries,
+    LIMITS.agentDetailsDepth,
+    (key) => AGENT_DETAIL_KEYS.has(key),
+  );
   if (normalized === invalid || !isPlainObject(normalized)) {
     return invalid;
   }
@@ -893,10 +924,13 @@ function encodeElixirFloat(value: number): string {
   return decimal;
 }
 
-function normalizeDetailValue(
+function normalizeJsonValue(
   value: unknown,
   depth: number,
   counters: { entries: number },
+  maximumEntries: number,
+  maximumDepth: number,
+  validKey: (key: string) => boolean = () => true,
 ): JsonValue | typeof invalid {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return value;
 
@@ -909,13 +943,20 @@ function normalizeDetailValue(
   }
 
   if (Array.isArray(value)) {
-    if (depth > LIMITS.agentDetailsDepth) return invalid;
+    if (depth > maximumDepth) return invalid;
     counters.entries += value.length;
-    if (counters.entries > LIMITS.agentDetailsEntries) return invalid;
+    if (counters.entries > maximumEntries) return invalid;
     const result: JsonValue[] = [];
     for (const item of value) {
       const nestedDepth = Array.isArray(item) || isPlainObject(item) ? depth + 1 : depth;
-      const normalized = normalizeDetailValue(item, nestedDepth, counters);
+      const normalized = normalizeJsonValue(
+        item,
+        nestedDepth,
+        counters,
+        maximumEntries,
+        maximumDepth,
+        validKey,
+      );
       if (normalized === invalid) return invalid;
       result.push(normalized);
     }
@@ -923,13 +964,10 @@ function normalizeDetailValue(
   }
 
   if (isPlainObject(value)) {
-    if (depth > LIMITS.agentDetailsDepth) return invalid;
+    if (depth > maximumDepth) return invalid;
     const keys = Object.keys(value);
     counters.entries += keys.length;
-    if (
-      counters.entries > LIMITS.agentDetailsEntries ||
-      keys.some((key) => !AGENT_DETAIL_KEYS.has(key))
-    ) {
+    if (counters.entries > maximumEntries || keys.some((key) => !validKey(key))) {
       return invalid;
     }
 
@@ -937,9 +975,21 @@ function normalizeDetailValue(
     for (const key of keys) {
       const item = value[key];
       const nestedDepth = Array.isArray(item) || isPlainObject(item) ? depth + 1 : depth;
-      const normalized = normalizeDetailValue(item, nestedDepth, counters);
+      const normalized = normalizeJsonValue(
+        item,
+        nestedDepth,
+        counters,
+        maximumEntries,
+        maximumDepth,
+        validKey,
+      );
       if (normalized === invalid) return invalid;
-      result[key] = normalized;
+      Object.defineProperty(result, key, {
+        value: normalized,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
     return result;
   }

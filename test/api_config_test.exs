@@ -15,6 +15,7 @@ defmodule Synapse.API.ConfigTest do
     :max_incoming_message_bytes,
     :max_incoming_frame_payload_bytes,
     :max_outgoing_message_bytes,
+    :max_input_tokens,
     :max_prompt_bytes,
     :max_request_id_bytes,
     :max_run_id_bytes,
@@ -60,6 +61,7 @@ defmodule Synapse.API.ConfigTest do
              max_incoming_message_bytes: 2_097_152,
              max_incoming_frame_payload_bytes: 2_097_152,
              max_outgoing_message_bytes: 3_276_800,
+             max_input_tokens: 272_000,
              max_prompt_bytes: 262_144,
              max_request_id_bytes: 128,
              max_run_id_bytes: 64,
@@ -88,6 +90,9 @@ defmodule Synapse.API.ConfigTest do
            }
 
     assert Config.max_incoming_frame_wire_bytes(config) == 2_097_166
+    assert config.fixed_input_tokens > 0
+    assert config.fixed_input_tokens < config.max_input_tokens
+    refute Config.valid?(%{config | fixed_input_tokens: config.fixed_input_tokens + 1})
   end
 
   test "environment overrides port, model, and aggregate output without widening policy" do
@@ -579,12 +584,24 @@ defmodule Synapse.API.ConfigTest do
 
     run_id = run_id()
 
+    conversation = [
+      %{"role" => "user", "content" => "Earlier question"},
+      %{"role" => "assistant", "content" => "Earlier answer"}
+    ]
+
     assert {:ok, start} =
              API.Command.Start.new(
-               [prompt: "Inspect.", cwd: "/tmp/project", model: "model-a", budget: config.budget],
+               [
+                 prompt: "Inspect.",
+                 conversation: conversation,
+                 cwd: "/tmp/project",
+                 model: "model-a",
+                 budget: config.budget
+               ],
                config
              )
 
+    assert start.conversation == conversation
     assert API.Command.Start.valid?(start, config)
     assert {:ok, {"request-1", ^start}} = API.Command.new("request-1", start, config)
 
@@ -592,6 +609,18 @@ defmodule Synapse.API.ConfigTest do
              API.Command.Start.new(
                [
                  prompt: String.duplicate("p", config.max_prompt_bytes + 1),
+                 cwd: "/tmp/project",
+                 model: "model-a",
+                 budget: config.budget
+               ],
+               config
+             )
+
+    assert {:error, {:conversation, :must_be_bounded_complete_user_assistant_pairs}} =
+             API.Command.Start.new(
+               [
+                 prompt: "Inspect.",
+                 conversation: [%{"role" => "user", "content" => "incomplete"}],
                  cwd: "/tmp/project",
                  model: "model-a",
                  budget: config.budget
@@ -643,6 +672,29 @@ defmodule Synapse.API.ConfigTest do
              API.Command.new(
                String.duplicate("r", config.max_request_id_bytes + 1),
                cancel,
+               config
+             )
+  end
+
+  test "Start distinguishes a lower configured context policy from the application limit" do
+    defaults = Config.default()
+
+    assert {:ok, config} =
+             Config.new(
+               enabled: true,
+               launch_cwd: @launch_cwd,
+               default_model: "model-a",
+               max_input_tokens: defaults.fixed_input_tokens + 1
+             )
+
+    assert {:error, {:context_window, :configured_limit_exceeded}} =
+             API.Command.Start.new(
+               [
+                 prompt: "Inspect",
+                 cwd: "/tmp/project",
+                 model: "model-a",
+                 budget: config.budget
+               ],
                config
              )
   end

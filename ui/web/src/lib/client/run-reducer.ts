@@ -1,5 +1,11 @@
 import { HARD_CLIENT_MAX_OUTPUT_BYTES, LIMITS } from '../protocol/constants';
-import type { RunEvent, RunEventMessage, StateSnapshotPayload, Terminal } from '../protocol/types';
+import type {
+  RunEvent,
+  RunEventMessage,
+  StartCommand,
+  StateSnapshotPayload,
+  Terminal,
+} from '../protocol/types';
 import { utf8ByteLength } from '../protocol/validation';
 import {
   projectionView,
@@ -11,9 +17,10 @@ import {
 } from './run-types';
 import { appendBounded } from './timeline';
 
-export function initialRunState(runId: string): RunState {
+export function initialRunState(runId: string, start: StartCommand | null = null): RunState {
   return {
     runId,
+    start,
     projection: {
       status: 'starting',
       model: null,
@@ -29,6 +36,10 @@ export function initialRunState(runId: string): RunState {
     lastAppliedSeq: 0,
     activity: [],
     activityBytes: 0,
+    events: [],
+    eventBytes: 0,
+    traceIncomplete: false,
+    traceBaseText: '',
     historyReset: false,
     knowledge: exactInitialKnowledge(),
   };
@@ -40,12 +51,17 @@ export function stateFromSnapshot(payload: StateSnapshotPayload): RunState {
 
   return {
     runId: payload.run_id,
+    start: null,
     projection,
     terminal: payload.terminal,
     cancelAcknowledged: payload.projection.status === 'cancel_requested',
     lastAppliedSeq: payload.last_seq,
     activity: [],
     activityBytes: 0,
+    events: [],
+    eventBytes: 0,
+    traceIncomplete: payload.last_seq > 0,
+    traceBaseText: projection.text,
     historyReset: payload.reset,
     knowledge: snapshotKnowledge(payload),
   };
@@ -63,6 +79,10 @@ export function applyRunEvent(
   const reduced = reduceEvent(state, payload.event, maxOutputBytes);
   if (!reduced.ok) return reduced;
 
+  const applied = { seq: payload.seq, event: payload.event };
+  const appliedBytes = utf8ByteLength(JSON.stringify(applied));
+  const trace = appendTrace(state, applied, appliedBytes);
+
   const entry = activityEntry(payload.seq, payload.event);
   const timeline = appendBounded(
     { entries: state.activity, bytes: state.activityBytes },
@@ -79,8 +99,35 @@ export function applyRunEvent(
       lastAppliedSeq: payload.seq,
       activity: timeline.entries,
       activityBytes: timeline.bytes,
+      events: trace.events,
+      eventBytes: trace.bytes,
+      traceIncomplete: state.traceIncomplete || trace.truncated,
+      traceBaseText: trace.baseText,
     },
   };
+}
+
+function appendTrace(
+  state: RunState,
+  applied: RunState['events'][number],
+  appliedBytes: number,
+): { events: RunState['events']; bytes: number; truncated: boolean; baseText: string } {
+  if (appliedBytes > LIMITS.traceBytes) {
+    return { events: [], bytes: 0, truncated: true, baseText: state.projection.text };
+  }
+
+  const events = [...state.events, applied];
+  let bytes = state.eventBytes + appliedBytes;
+  let truncated = false;
+  let baseText = state.traceBaseText;
+  while (events.length > LIMITS.traceEntries || bytes > LIMITS.traceBytes) {
+    const removed = events.shift();
+    if (!removed) break;
+    bytes -= utf8ByteLength(JSON.stringify(removed));
+    if (removed.event.type === 'text.delta') baseText += removed.event.delta;
+    truncated = true;
+  }
+  return { events, bytes, truncated, baseText };
 }
 
 export function applyRunTerminal(

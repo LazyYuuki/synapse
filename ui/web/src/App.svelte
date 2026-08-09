@@ -14,16 +14,14 @@
   } from './lib/client/composer';
   import type { ConnectionLifecycle } from './lib/client/connection.svelte';
   import type { RunState } from './lib/client/run-types';
-  import AssistantOutput from './lib/components/AssistantOutput.svelte';
+  import ChatTimeline from './lib/components/ChatTimeline.svelte';
   import ProtocolInspector from './lib/components/ProtocolInspector.svelte';
-  import RunActivity from './lib/components/RunActivity.svelte';
-  import TerminalResult from './lib/components/TerminalResult.svelte';
   import {
     BUDGET_LIMITS,
     DEFAULT_API_URL,
     HARD_CLIENT_MAX_OUTPUT_BYTES,
   } from './lib/protocol/constants';
-  import type { Budget, RunStatus, Terminal } from './lib/protocol/types';
+  import type { Budget, RunStatus } from './lib/protocol/types';
 
   let {
     createClient = createBrowserClientControllers,
@@ -42,6 +40,10 @@
   let runHeading: HTMLHeadingElement;
   let runIdCopyNotice = $state<string | null>(null);
   let current = $derived(currentRun(client));
+  let runs = $derived(client ? client.run.runs : []);
+  let hasConversationHistory = $derived(
+    runs.some((run) => run.start !== null && run.terminal?.status === 'completed'),
+  );
   let handledReadyGeneration = 0;
   let workspaceManuallyEdited = false;
   let serverMaxOutputBytes = $state(HARD_CLIENT_MAX_OUTPUT_BYTES);
@@ -218,12 +220,17 @@
     if (!client) return 'Client controls are initializing.';
     if (client.connection.startAmbiguous)
       return 'A previous start outcome is unknown; it cannot be resent.';
-    if (client.run.current) return 'Clear the settled current run before starting another.';
-    if (client.run.restoredRunId)
+    if (client.run.current && !client.run.current.terminal)
+      return 'Wait for the active run to settle.';
+    if (client.run.restoredRunId && !client.run.current)
       return 'The retained run must be restored or confirmed missing first.';
     if (client.connection.lifecycle !== 'ready') return 'Start requires a validated server.hello.';
     if (client.connection.pendingStart) return 'Start is waiting for a direct server response.';
-    return 'Ready for one explicit protocol-v1 start command.';
+    return hasConversationHistory
+      ? 'Ready to continue; bounded completed history is included when it fits the command frame.'
+      : current?.terminal
+        ? 'No complete successful pair is available, so this starts without prior conversation context.'
+        : 'Ready for an explicit protocol-v1 start command.';
   }
 
   function cancelReason(): string {
@@ -300,14 +307,6 @@
       failed: 'Failed',
       interrupted: 'Interrupted',
     }[status];
-  }
-
-  function terminalAnnouncement(terminal: Terminal): string {
-    if (terminal.status === 'completed') return 'Run completed. Terminal settlement confirmed.';
-    if (terminal.error.source === 'runtime' && terminal.error.reason === 'runtime_lost') {
-      return 'Run interrupted: Runtime lost. Final cleanup settlement was not observed.';
-    }
-    return `Run ${terminal.status}: ${terminal.error.source} ${terminal.error.reason}. Terminal settlement confirmed.`;
   }
 
   function syncLabel(): string {
@@ -575,17 +574,21 @@
               disabled={!client?.canStartRun}
               aria-describedby="start-reason"
             >
-              {client?.connection.pendingStart ? 'Starting...' : 'Start run'}
+              {client?.connection.pendingStart
+                ? 'Starting...'
+                : current?.terminal && hasConversationHistory
+                  ? 'Continue session'
+                  : 'Start run'}
             </button>
           </div>
         </form>
       </section>
 
-      <section class="panel run-panel" aria-labelledby="run-heading">
+      <section class="panel run-panel chat-panel" aria-labelledby="run-heading">
         <div class="panel-heading run-heading">
           <span class="section-number" aria-hidden="true">02</span>
           <div>
-            <p class="eyebrow">Observe</p>
+            <p class="eyebrow">Conversation</p>
             <h2 id="run-heading" bind:this={runHeading} tabindex="-1">Current run</h2>
           </div>
           <div class="run-indicators">
@@ -596,12 +599,27 @@
           </div>
         </div>
 
-        <dl class="run-metadata">
+        <div class="chat-toolbar">
+          <span>{runs.length} run{runs.length === 1 ? '' : 's'} in memory</span>
+          <span class="run-sync-state" aria-live={current?.terminal ? 'off' : 'polite'}
+            >{syncLabel()}</span
+          >
+          <code>{current?.runId ?? 'Not assigned'}</code>
+          {#if current}
+            <button class="copy-id-action" type="button" onclick={copyRunId}>Copy run ID</button>
+            {#if runIdCopyNotice}<span class="copy-notice" aria-live="polite"
+                >{runIdCopyNotice}</span
+              >{/if}
+          {/if}
+          {#if client?.canClearRun}
+            <button class="secondary-action" type="button" onclick={clearRun}>New run</button>
+          {/if}
+        </div>
+
+        <dl class="run-metadata compact">
           <div>
             <dt>Run ID</dt>
-            <dd title={current?.runId ?? client?.run.restoredRunId ?? undefined}>
-              {current?.runId ?? client?.run.restoredRunId ?? 'Not assigned'}
-            </dd>
+            <dd>{current?.runId ?? 'Not assigned'}</dd>
           </div>
           <div>
             <dt>Model</dt>
@@ -629,77 +647,26 @@
           </div>
         </dl>
 
-        {#if current}
-          <div class="run-id-actions">
-            <button class="copy-id-action" type="button" onclick={copyRunId}>Copy run ID</button>
-            {#if runIdCopyNotice}<span class="copy-notice" aria-live="polite"
-                >{runIdCopyNotice}</span
-              >{/if}
-          </div>
-        {/if}
-
-        {#if current || client?.run.restoredRunId}
-          <div class="run-sync-state" aria-live={current?.terminal ? 'off' : 'polite'}>
-            <span>{syncLabel()}</span>
-            {#if client?.run.catchUpTarget !== null}
-              <span>Replay target #{client?.run.catchUpTarget}</span>
-            {/if}
-            {#if current?.historyReset}
-              <span>Earlier activity is unavailable; current server state was restored.</span>
-            {/if}
-          </div>
-        {/if}
-
-        {#if current || client?.run.syncState === 'not_found'}
+        {#if current && !current.terminal}
           <div class="run-actions" aria-label="Run actions">
-            {#if current && !current.terminal}
-              <button
-                class="cancel-action"
-                type="button"
-                onclick={cancel}
-                disabled={!client?.canCancelRun}
-                aria-describedby="cancel-reason"
-              >
-                {client?.connection.pendingCancel
-                  ? 'Requesting cancellation...'
-                  : current.cancelAcknowledged
-                    ? 'Cancellation requested'
-                    : 'Cancel run'}
-              </button>
-              <p id="cancel-reason">{cancelReason()}</p>
-            {/if}
-            {#if client?.canClearRun}
-              <button class="secondary-action" type="button" onclick={clearRun}>New run</button>
-              <p>Clears this browser view only; retained server history is unchanged.</p>
-            {/if}
+            <button
+              class="cancel-action"
+              type="button"
+              onclick={cancel}
+              disabled={!client?.canCancelRun}
+              aria-describedby="cancel-reason"
+            >
+              {client?.connection.pendingCancel
+                ? 'Requesting cancellation...'
+                : current.cancelAcknowledged
+                  ? 'Cancellation requested'
+                  : 'Cancel run'}
+            </button>
+            <p id="cancel-reason">{cancelReason()}</p>
           </div>
         {/if}
 
-        <AssistantOutput text={current?.projection.text ?? ''} runId={current?.runId ?? null} />
-
-        {#if current?.terminal}
-          <p
-            class="visually-hidden"
-            role={current.terminal.status === 'completed' ? 'status' : 'alert'}
-            aria-atomic="true"
-          >
-            {terminalAnnouncement(current.terminal)}
-          </p>
-          <TerminalResult terminal={current.terminal} projection={current.projection} />
-        {/if}
-
-        <div class="tool-strip">
-          <span class="tool-label">Active Tool</span>
-          <span class="tool-value">{current?.projection.activeTool?.name ?? 'None'}</span>
-          {#if current?.projection.activeTool}
-            <span class="tool-note">
-              Active / turn {current.projection.activeTool.turn} / ordinal {current.projection
-                .activeTool.ordinal}
-            </span>
-          {:else}
-            <span class="tool-note">Arguments are never exposed by protocol v1</span>
-          {/if}
-        </div>
+        <ChatTimeline {runs} error={client?.errors.notice ?? null} />
       </section>
     </div>
 
@@ -712,7 +679,10 @@
         {#if client}<ProtocolInspector timeline={client.protocol} />{/if}
       </div>
 
-      <RunActivity state={current} />
+      <p class="activity-summary">
+        Every visible conversation item exposes its exact retained command, event, or terminal
+        payload through an API trace disclosure.
+      </p>
     </section>
   </main>
 

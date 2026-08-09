@@ -13,20 +13,30 @@ defmodule Synapse.API.ProtocolTest do
     assert {:ok, {"request-start", %Start{} = start}} =
              Protocol.decode(
                ~S({
-                 "version": 1,
-                 "type": "run.start",
-                 "request_id": "request-start",
-                 "payload": {
-                   "prompt": "Inspect the project.",
-                   "cwd": "/tmp/project",
-                   "model": "model-a",
-                   "budget": {"max_turns": 10, "max_provider_retries": 1}
-                 }
+                  "version": 1,
+                  "type": "run.start",
+                  "request_id": "request-start",
+                  "payload": {
+                    "prompt": "Inspect the project.",
+                    "conversation": [
+                      {"role": "user", "content": "What is here?"},
+                      {"role": "assistant", "content": "A project."}
+                    ],
+                    "cwd": "/tmp/project",
+                    "model": "model-a",
+                    "budget": {"max_turns": 10, "max_provider_retries": 1}
+                  }
                }),
                config
              )
 
     assert start.prompt == "Inspect the project."
+
+    assert start.conversation == [
+             %{"role" => "user", "content" => "What is here?"},
+             %{"role" => "assistant", "content" => "A project."}
+           ]
+
     assert start.cwd == "/tmp/project"
     assert start.model == "model-a"
     assert start.budget.max_turns == 10
@@ -59,6 +69,7 @@ defmodule Synapse.API.ProtocolTest do
 
     assert start.model == config.default_model
     assert start.budget == config.budget
+    assert start.conversation == []
 
     assert {:error, :invalid_payload, "request-1"} =
              decode_start(
@@ -71,6 +82,115 @@ defmodule Synapse.API.ProtocolTest do
                %{"prompt" => "Inspect", "cwd" => "/tmp/project", "budget" => nil},
                config
              )
+  end
+
+  test "start accepts bounded complete conversation history" do
+    config = config()
+
+    maximum_messages =
+      List.duplicate(
+        [
+          %{"role" => "user", "content" => "u"},
+          %{"role" => "assistant", "content" => "a"}
+        ],
+        64
+      )
+      |> List.flatten()
+
+    assert {:ok, {_, %Start{conversation: ^maximum_messages}}} =
+             decode_start(start_payload(%{"conversation" => maximum_messages}), config)
+
+    maximum_bytes = [
+      %{"role" => "user", "content" => String.duplicate("u", 1_572_863)},
+      %{"role" => "assistant", "content" => "a"}
+    ]
+
+    assert {:error, :token_limit_exceeded, "request-1"} =
+             decode_start(start_payload(%{"conversation" => maximum_bytes}), config)
+  end
+
+  test "start rejects malformed, incomplete, forbidden-role, and oversized conversation history" do
+    config = config()
+
+    valid_pair = [
+      %{"role" => "user", "content" => "question"},
+      %{"role" => "assistant", "content" => "answer"}
+    ]
+
+    invalid = [
+      nil,
+      %{"role" => "user", "content" => "not a list"},
+      [%{"role" => "user", "content" => "incomplete"}],
+      [%{"role" => "assistant", "content" => "wrong start"}],
+      [
+        %{"role" => "user", "content" => "question"},
+        %{"role" => "user", "content" => "not alternating"}
+      ],
+      [
+        %{"role" => "user", "content" => "question"},
+        %{"role" => "tool", "content" => "forbidden"}
+      ],
+      [
+        %{"role" => "user", "content" => "question", "extra" => true},
+        %{"role" => "assistant", "content" => "answer"}
+      ],
+      [
+        %{"role" => "user", "content" => "  \n"},
+        %{"role" => "assistant", "content" => "answer"}
+      ],
+      [
+        %{"role" => "user", "content" => String.duplicate("u", 1_572_864)},
+        %{"role" => "assistant", "content" => "a"}
+      ]
+    ]
+
+    Enum.each(invalid, fn conversation ->
+      assert {:error, :invalid_payload, "request-1"} =
+               decode_start(start_payload(%{"conversation" => conversation}), config)
+    end)
+
+    assert {:error, :invalid_envelope, "request-1"} =
+             decode_start(
+               start_payload(%{
+                 "conversation" => List.duplicate(valid_pair, 65) |> List.flatten()
+               }),
+               config
+             )
+  end
+
+  test "start returns correlated token_limit_exceeded at one estimated token over policy" do
+    config = config()
+    prompt = "Inspect"
+    conversation = conversation_at_tokens(config, prompt, config.max_input_tokens)
+
+    assert {:ok, {_, %Start{conversation: ^conversation}}} =
+             decode_start(start_payload(%{"conversation" => conversation}), config)
+
+    [%{"role" => "user", "content" => content}, assistant] = conversation
+    over = [%{"role" => "user", "content" => content <> "xxx"}, assistant]
+
+    assert {:error, :token_limit_exceeded, "request-1"} =
+             decode_start(start_payload(%{"conversation" => over}), config)
+  end
+
+  test "conversation byte backstop remains subordinate to the encoded frame ceiling" do
+    config = config()
+
+    escaped = [
+      %{"role" => "user", "content" => String.duplicate("\\", 1_100_000)},
+      %{"role" => "assistant", "content" => "a"}
+    ]
+
+    message =
+      JSON.encode!(%{
+        "version" => 1,
+        "type" => "run.start",
+        "request_id" => "request-1",
+        "payload" => start_payload(%{"conversation" => escaped})
+      })
+
+    assert byte_size(message) > config.max_incoming_message_bytes
+    assert {:close, :message_too_big} = Protocol.decode(message, config)
   end
 
   test "every Budget field may be omitted, lowered, or equal but never widened" do
@@ -290,7 +410,7 @@ defmodule Synapse.API.ProtocolTest do
              decode_start(start_payload(%{"cwd" => cwd <> "c"}), config)
   end
 
-  test "maximum escaped command fields fit the complete incoming envelope" do
+  test "maximum escaped command fields fit transport but still honor context admission" do
     request_id = String.duplicate(~S("), 128)
     prompt = String.duplicate(<<0>>, 262_144)
     model = String.duplicate("\\", 256)
@@ -313,8 +433,7 @@ defmodule Synapse.API.ProtocolTest do
 
     assert byte_size(message) <= config.max_incoming_message_bytes
 
-    assert {:ok, {^request_id, %Start{prompt: ^prompt, cwd: ^cwd, model: ^model}}} =
-             Protocol.decode(message, config)
+    assert {:error, :token_limit_exceeded, ^request_id} = Protocol.decode(message, config)
 
     assert {:error, :invalid_payload, "request-1"} =
              decode_start(%{"prompt" => prompt <> <<0>>, "cwd" => cwd, "model" => model}, config)
@@ -599,6 +718,7 @@ defmodule Synapse.API.ProtocolTest do
               :unknown_type,
               :invalid_request_id,
               :invalid_payload,
+              :token_limit_exceeded,
               :internal_error
             ] and (is_binary(request_id) or is_nil(request_id)),
        do: :ok
@@ -614,6 +734,34 @@ defmodule Synapse.API.ProtocolTest do
         "request_id" => request_id,
         "payload" => %{}
       })
+
+  defp conversation_at_tokens(config, prompt, target) do
+    base = [
+      %{"role" => "user", "content" => "u"},
+      %{"role" => "assistant", "content" => "a"}
+    ]
+
+    {:ok, base_tokens} =
+      Synapse.Agent.ContextWindow.estimate_tokens(base, prompt, config.fixed_input_tokens)
+
+    growth = (target - base_tokens) * 3
+
+    Enum.find_value((growth - 3)..(growth + 3), fn bytes ->
+      conversation = [
+        %{"role" => "user", "content" => String.duplicate("u", bytes + 1)},
+        %{"role" => "assistant", "content" => "a"}
+      ]
+
+      case Synapse.Agent.ContextWindow.estimate_tokens(
+             conversation,
+             prompt,
+             config.fixed_input_tokens
+           ) do
+        {:ok, ^target} -> conversation
+        _other -> nil
+      end
+    end) || flunk("could not construct exact token boundary")
+  end
 
   defp run_id, do: "run_" <> Base.url_encode64(<<0::128>>, padding: false)
 end

@@ -3,7 +3,8 @@ defmodule Synapse.Agent.Projection do
   Pure full-history projection and immutable turn-request construction.
 
   Projection is the Agent-owned boundary between normalized application state and
-  `Synapse.Provider.Request`. It creates the first exact user message, advertises
+  `Synapse.Provider.Request`. It projects bounded completed conversation history
+  before the first exact current user message, advertises
   the four static MVP Tool schemas, retains completed assistant Messages and
   FunctionCalls, inserts each matching Tool Result immediately after its call,
   and validates the complete input before returning a new State or Request.
@@ -16,8 +17,8 @@ defmodule Synapse.Agent.Projection do
 
   The MVP sends full projected history on every turn rather than using
   `previous_response_id` or account-specific server state. It does not inject the
-  repository, environment, plans, or external chat into initial context; the
-  model retrieves project evidence through bounded Tools.
+  repository, environment, or plans into initial context; the model retrieves
+  project evidence through bounded Tools.
 
   ```text
   user message
@@ -97,13 +98,14 @@ defmodule Synapse.Agent.Projection do
           | {:state, State.validation_error()}
           | {:request, Request.validation_error()}
 
-  @doc "Creates initial zero-counter State with one exact user prompt message."
+  @doc "Creates initial zero-counter State with completed history and the exact current prompt."
   @spec initial_state(RunRequest.t(), Context.t(), integer()) ::
           {:ok, State.t()} | {:error, error()}
   def initial_state(run, context, started_at) do
     with {:ok, run} <- normalize_run(run),
          {:ok, context} <- normalize_context(context),
-         input_items <- [user_input(run.prompt)],
+         input_items <-
+           Enum.map(run.conversation, &conversation_input/1) ++ [user_input(run.prompt)],
          {:ok, state} <-
            State.new(
              run: run,
@@ -284,6 +286,17 @@ defmodule Synapse.Agent.Projection do
       "type" => "message",
       "role" => "user",
       "content" => [%{"type" => "input_text", "text" => prompt}]
+    }
+  end
+
+  defp conversation_input(%{"role" => "user", "content" => content}),
+    do: user_input(content)
+
+  defp conversation_input(%{"role" => "assistant", "content" => content}) do
+    %{
+      "type" => "message",
+      "role" => "assistant",
+      "content" => [%{"type" => "output_text", "text" => content}]
     }
   end
 

@@ -11,13 +11,14 @@ defmodule Synapse.Run.Request do
   Fields:
 
   * `id` is a bounded trusted run correlation identifier;
-  * `prompt` is the exact non-empty user input projected on the first turn;
+  * `conversation` is bounded completed user/assistant history projected first;
+  * `prompt` is the exact non-empty current user input projected after history;
   * `cwd` is trusted canonical-workspace input for Runtime, never model authority;
   * `model` is the explicit Provider model identifier;
   * `capabilities` is trusted fixed Tool authority;
   * `budget` is the aggregate run policy.
 
-  Ordinary inspection redacts prompt and workspace path.
+  Ordinary inspection redacts conversation, prompt, and workspace path.
 
   ## Example
 
@@ -41,16 +42,23 @@ defmodule Synapse.Run.Request do
 
   @max_id_bytes 256
   @max_prompt_bytes 1_048_576
+  @max_conversation_messages 128
+  @max_conversation_content_bytes 1_572_864
   @max_cwd_bytes 4_096
   @max_model_bytes 256
-  @allowed_fields [:id, :prompt, :cwd, :model, :capabilities, :budget]
+  @required_fields [:id, :prompt, :cwd, :model, :capabilities, :budget]
+  @allowed_fields @required_fields ++ [:conversation]
 
-  @enforce_keys @allowed_fields
-  defstruct @allowed_fields
+  @enforce_keys @required_fields
+  defstruct @required_fields ++ [conversation: []]
+
+  @typedoc "One exact string-keyed historical user or assistant message."
+  @type conversation_message :: %{String.t() => String.t()}
 
   @typedoc "Trusted run identity, input, local workspace selection, and policy."
   @type t :: %__MODULE__{
           id: String.t(),
+          conversation: [conversation_message()],
           prompt: String.t(),
           cwd: String.t(),
           model: String.t(),
@@ -63,6 +71,7 @@ defmodule Synapse.Run.Request do
           {:attributes, :must_be_keyword_or_map}
           | {:unknown_fields, [term()]}
           | {:id, :must_be_bounded_non_empty_utf8_identifier}
+          | {:conversation, :must_be_bounded_complete_user_assistant_pairs}
           | {:prompt, :must_be_bounded_non_empty_utf8_string}
           | {:cwd, :must_be_bounded_utf8_path}
           | {:model, :must_be_bounded_non_empty_utf8_identifier}
@@ -76,6 +85,7 @@ defmodule Synapse.Run.Request do
          true <-
            identifier?(attrs[:id], @max_id_bytes) or
              {:error, {:id, :must_be_bounded_non_empty_utf8_identifier}},
+         {:ok, conversation} <- normalize_conversation(Map.get(attrs, :conversation, [])),
          true <-
            bounded_non_empty_utf8?(attrs[:prompt], @max_prompt_bytes) or
              {:error, {:prompt, :must_be_bounded_non_empty_utf8_string}},
@@ -88,6 +98,7 @@ defmodule Synapse.Run.Request do
       {:ok,
        %__MODULE__{
          id: attrs.id,
+         conversation: conversation,
          prompt: attrs.prompt,
          cwd: attrs.cwd,
          model: attrs.model,
@@ -103,6 +114,32 @@ defmodule Synapse.Run.Request do
     do: match?({:ok, %__MODULE__{}}, new(Map.from_struct(request)))
 
   def valid?(_request), do: false
+
+  @doc false
+  @spec normalize_conversation(term()) ::
+          {:ok, [conversation_message()]}
+          | {:error, {:conversation, :must_be_bounded_complete_user_assistant_pairs}}
+  def normalize_conversation(conversation) do
+    if proper_list?(conversation, @max_conversation_messages) do
+      conversation
+      |> Enum.reduce_while({:ok, 0, "user"}, fn message, {:ok, bytes, expected_role} ->
+        case conversation_message(message, expected_role, bytes) do
+          {:ok, next_bytes} ->
+            next_role = if expected_role == "user", do: "assistant", else: "user"
+            {:cont, {:ok, next_bytes, next_role}}
+
+          :error ->
+            {:halt, :error}
+        end
+      end)
+      |> case do
+        {:ok, _bytes, "user"} -> {:ok, conversation}
+        _invalid -> conversation_error()
+      end
+    else
+      conversation_error()
+    end
+  end
 
   defp normalize_capabilities(%CapabilitySet{} = capabilities) do
     case CapabilitySet.new(Map.from_struct(capabilities)) do
@@ -122,6 +159,25 @@ defmodule Synapse.Run.Request do
   end
 
   defp normalize_budget(_budget), do: {:error, {:budget, :must_be_budget}}
+
+  defp conversation_message(
+         %{"role" => role, "content" => content} = message,
+         expected_role,
+         bytes
+       ) do
+    next_bytes = bytes + if(is_binary(content), do: byte_size(content), else: 0)
+
+    if map_size(message) == 2 and role == expected_role and
+         bounded_non_empty_utf8?(content, @max_conversation_content_bytes) and
+         next_bytes <= @max_conversation_content_bytes,
+       do: {:ok, next_bytes},
+       else: :error
+  end
+
+  defp conversation_message(_message, _expected_role, _bytes), do: :error
+
+  defp conversation_error,
+    do: {:error, {:conversation, :must_be_bounded_complete_user_assistant_pairs}}
 
   defp attributes(attrs) when is_list(attrs) do
     if proper_list?(attrs, length(@allowed_fields) + 1) and Keyword.keyword?(attrs),
@@ -169,6 +225,6 @@ end
 
 defimpl Inspect, for: Synapse.Run.Request do
   def inspect(request, _options) do
-    "#Synapse.Run.Request<id=#{inspect(request.id)} model=#{inspect(request.model)} prompt=redacted cwd=redacted capabilities=#{inspect(request.capabilities)} budget=#{inspect(request.budget)}>"
+    "#Synapse.Run.Request<id=#{inspect(request.id)} model=#{inspect(request.model)} conversation=redacted prompt=redacted cwd=redacted capabilities=#{inspect(request.capabilities)} budget=#{inspect(request.budget)}>"
   end
 end

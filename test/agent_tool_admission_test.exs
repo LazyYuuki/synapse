@@ -138,12 +138,23 @@ defmodule Synapse.Agent.AdmissionTest do
     end)
 
     assert Enum.map(admission.calls, & &1.call_id) == ~w(call-first call-second)
-    assert_received {:run_event, %Event.ToolStarted{call_id: "call-first", ordinal: 1}}
+
+    assert_received {:run_event,
+                     %Event.ToolStarted{
+                       call_id: "call-first",
+                       ordinal: 1,
+                       arguments: %{"path" => "first.txt"}
+                     }}
 
     assert_received {:run_event,
                      %Event.ToolCompleted{call_id: "call-first", ordinal: 1, status: :error}}
 
-    assert_received {:run_event, %Event.ToolStarted{call_id: "call-second", ordinal: 2}}
+    assert_received {:run_event,
+                     %Event.ToolStarted{
+                       call_id: "call-second",
+                       ordinal: 2,
+                       arguments: %{"path" => "second.txt"}
+                     }}
 
     assert_received {:run_event,
                      %Event.ToolCompleted{call_id: "call-second", ordinal: 2, status: :error}}

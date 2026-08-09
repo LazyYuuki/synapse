@@ -75,8 +75,9 @@ test('completes one exact protocol-v1 run through the real browser WebSocket', a
     }),
   );
   await expect(page.getByRole('region', { name: 'Active Tool' })).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('Tool completed');
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('outcome completed');
+  await expect(page.getByRole('region', { name: 'Current run' })).toContainText(
+    'Tool result / read / ok',
+  );
   await connection.send(
     runEvent(6, {
       type: 'turn.completed',
@@ -87,7 +88,7 @@ test('completes one exact protocol-v1 run through the real browser WebSocket', a
       output_bytes: 33,
     }),
   );
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('Turn completed');
+  await expect(page.getByRole('region', { name: 'Current run' })).toContainText('Turn completed');
   await expect(runMetric(page, 'Provider attempts')).toHaveText('2');
   await expect(runMetric(page, 'Tool calls')).toHaveText('1');
   await expect(runMetric(page, 'Output bytes')).toHaveText('33');
@@ -197,7 +198,8 @@ test('keeps a maximum-output run responsive, stable, and single-node', async ({
   });
   const connection = await connect(page, socketServer);
   await startAcceptedRun(page, connection);
-  const output = 'x'.repeat(524_288);
+  const chunk = 'x '.repeat(2_048);
+  const output = chunk.repeat(128);
   await connection.send(runEvent(1, { type: 'run.started', model: 'model-a' }));
   await connection.send(
     runEvent(2, { type: 'turn.started', turn: 1, operation_id: 'provider-max' }),
@@ -211,11 +213,11 @@ test('keeps a maximum-output run responsive, stable, and single-node', async ({
         operation_id: 'provider-max',
         item_id: 'item-max',
         content_index: 0,
-        delta: 'x'.repeat(4_096),
+        delta: chunk,
       }),
     );
     if (index === 63) {
-      await expect(page.locator('.assistant-text')).toHaveText('x'.repeat(262_144));
+      await expect(page.locator('.assistant-text')).toHaveText(output.slice(0, 262_144));
       streamingLatency = await page.getByLabel('API socket').evaluate(async (element) => {
         const started = performance.now();
         element.dispatchEvent(new InputEvent('input', { bubbles: true, data: '' }));
@@ -254,6 +256,12 @@ test('keeps a maximum-output run responsive, stable, and single-node', async ({
   await expect(rendered).toHaveCount(1);
   expect(await rendered.evaluate((element) => element.textContent?.length)).toBe(524_288);
   expect(await rendered.evaluate((element) => element.childNodes.length)).toBe(1);
+  expect(
+    await page.locator('.chat-timeline').evaluate((element) => ({
+      overflowY: getComputedStyle(element).overflowY,
+      scrolls: element.scrollHeight > element.clientHeight,
+    })),
+  ).toEqual({ overflowY: 'scroll', scrolls: true });
   expect(await hasHorizontalOverflow(page)).toBe(false);
   expect(streamingLatency).toBeLessThan(250);
   expect(

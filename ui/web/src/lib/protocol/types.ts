@@ -25,6 +25,11 @@ export type ClientEnvelope<TType extends string, TPayload> = {
   payload: TPayload;
 };
 
+export type ConversationMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
 export type StartCommand = ClientEnvelope<
   'run.start',
   {
@@ -32,6 +37,7 @@ export type StartCommand = ClientEnvelope<
     cwd: string;
     model?: string;
     budget?: Partial<Budget>;
+    conversation?: ConversationMessage[];
   }
 >;
 
@@ -60,6 +66,7 @@ export type ServerErrorCode =
   | 'unknown_type'
   | 'invalid_request_id'
   | 'invalid_payload'
+  | 'token_limit_exceeded'
   | 'run_busy'
   | 'run_not_found'
   | 'invalid_cursor'
@@ -133,12 +140,14 @@ export type ToolStartedEvent = {
   call_id: string;
   name: string;
   ordinal: number;
+  arguments: JsonObject;
 };
 
-export type ToolCompletedEvent = Omit<ToolStartedEvent, 'type'> & {
+export type ToolCompletedEvent = Omit<ToolStartedEvent, 'type' | 'arguments'> & {
   type: 'tool.completed';
   status: 'ok' | 'error' | 'ambiguous';
   metadata: ToolPublicMetadata;
+  content: string;
 };
 
 export type TurnCompletedEvent = {

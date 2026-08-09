@@ -635,10 +635,14 @@ defmodule Synapse.Runtime.AwaitTest do
       ordinal: 1
     ]
 
-    {:ok, tool_started} = Synapse.Run.Event.new(:tool_started, tool_attrs)
+    {:ok, tool_started} =
+      Synapse.Run.Event.new(:tool_started, tool_attrs ++ [arguments: %{}])
 
     {:ok, tool_completed} =
-      Synapse.Run.Event.new(:tool_completed, tool_attrs ++ [status: :ok, metadata: %{}])
+      Synapse.Run.Event.new(
+        :tool_completed,
+        tool_attrs ++ [status: :ok, metadata: %{}, content: ~s({"status":"ok"})]
+      )
 
     scenarios = [
       {:before_run_started, [], RunFailed, :run_worker_crashed, :agent_failed},
