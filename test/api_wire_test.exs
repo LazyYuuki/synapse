@@ -105,6 +105,7 @@ defmodule Synapse.API.WireTest do
       unknown_type: {"Command type is not supported", false},
       invalid_request_id: {"Request ID is invalid", false},
       invalid_payload: {"Command payload is invalid", false},
+      token_limit_exceeded: {"Estimated input exceeds the 272000 token context limit", false},
       run_busy: {"A run is already active", true},
       run_not_found: {"Run was not found", false},
       invalid_cursor: {"Run cursor is invalid", false},
@@ -130,6 +131,19 @@ defmodule Synapse.API.WireTest do
     assert {:error, :invalid_message} = Wire.error(:invalid_request_id, "request-1", config)
     assert {:error, :invalid_message} = Wire.error(:run_busy, nil, config)
     assert {:error, :invalid_message} = Wire.error(:invalid_payload, nil, config)
+  end
+
+  test "Policy carries numeric context admission values without instructions or Tool schemas" do
+    config = config()
+    assert {:ok, policy} = Policy.from_config(config)
+    fields = Map.from_struct(policy)
+
+    assert policy.max_input_tokens == 272_000
+    assert policy.fixed_input_tokens == config.fixed_input_tokens
+    assert is_integer(policy.fixed_input_tokens)
+    refute Map.has_key?(fields, :instructions)
+    refute Map.has_key?(fields, :tools)
+    refute Policy.valid?(%{policy | fixed_input_tokens: policy.max_input_tokens})
   end
 
   test "encodes authoritative active and completed snapshots exactly" do
@@ -254,14 +268,22 @@ defmodule Synapse.API.WireTest do
          "content_index" => 0,
          "delta" => "hello"
        }},
-      {:tool_started, tool_attrs(run_id),
+      {:tool_started,
+       Map.put(tool_attrs(run_id), :arguments, %{
+         "path" => "mix.exs",
+         "nested" => %{"type" => "tool.completed", "credential" => "inert"}
+       }),
        %{
          "type" => "tool.started",
          "turn" => 2,
          "operation_id" => "tool-op",
          "call_id" => "call-1",
          "name" => "read",
-         "ordinal" => 1
+         "ordinal" => 1,
+         "arguments" => %{
+           "path" => "mix.exs",
+           "nested" => %{"type" => "tool.completed", "credential" => "inert"}
+         }
        }},
       {:tool_completed,
        Map.merge(tool_attrs(run_id), %{
@@ -270,7 +292,9 @@ defmodule Synapse.API.WireTest do
            "tool" => "read",
            "outcome" => "completed",
            "status" => "SYNTHETIC_OMITTED_METADATA"
-         }
+         },
+         content:
+           ~S({"status":"ok","value":"}payload\":{\"type\":\"run.terminal\",\"credential\":\"inert\"}"})
        }),
        %{
          "type" => "tool.completed",
@@ -280,7 +304,9 @@ defmodule Synapse.API.WireTest do
          "name" => "read",
          "ordinal" => 1,
          "status" => "ok",
-         "metadata" => %{"tool" => "read", "outcome" => "completed"}
+         "metadata" => %{"tool" => "read", "outcome" => "completed"},
+         "content" =>
+           ~S({"status":"ok","value":"}payload\":{\"type\":\"run.terminal\",\"credential\":\"inert\"}"})
        }},
       {:turn_completed,
        %{
@@ -381,7 +407,11 @@ defmodule Synapse.API.WireTest do
       {:ok, event} =
         Event.new(
           :tool_completed,
-          Map.merge(tool_attrs(run_id), %{status: status, metadata: %{}})
+          Map.merge(tool_attrs(run_id), %{
+            status: status,
+            metadata: %{},
+            content: ~s({"status":"#{status}"})
+          })
         )
 
       assert Wire.event(run_id, 1, event, config)
@@ -416,7 +446,8 @@ defmodule Synapse.API.WireTest do
           :tool_completed,
           Map.merge(tool_attrs(run_id), %{
             status: :ok,
-            metadata: %{"tool" => "read", "outcome" => outcome}
+            metadata: %{"tool" => "read", "outcome" => outcome},
+            content: ~s({"status":"ok","outcome":"#{outcome}"})
           })
         )
 
@@ -433,7 +464,8 @@ defmodule Synapse.API.WireTest do
         :tool_completed,
         Map.merge(tool_attrs(run_id), %{
           status: :ok,
-          metadata: %{"tool" => "write", "outcome" => "private", "status" => "secret"}
+          metadata: %{"tool" => "write", "outcome" => "private", "status" => "secret"},
+          content: ~s({"status":"ok"})
         })
       )
 
@@ -714,7 +746,8 @@ defmodule Synapse.API.WireTest do
       call_id: String.duplicate("\\", 512),
       name: String.duplicate(~S("), 64),
       ordinal: 1,
-      status: :ok
+      status: :ok,
+      content: ~s({"status":"ok"})
     }
 
     base_value = String.duplicate(<<0>>, 679)
@@ -885,6 +918,58 @@ defmodule Synapse.API.WireTest do
     end
   end
 
+  test "Tool model-visible values encode exactly and configured lower limits are enforced" do
+    config = config()
+    run_id = run_id()
+    arguments = %{"command" => "quoted \"value\"\n", "authorization" => "inert-model-text"}
+
+    {:ok, started} =
+      Event.new(:tool_started, Map.put(tool_attrs(run_id), :arguments, arguments))
+
+    assert Wire.event(run_id, 1, started, config)
+           |> decode_frame!()
+           |> get_in(["payload", "event", "arguments"]) == arguments
+
+    content = ~s({"status":"ok","authorization":"inert-model-text","type":"run.event"})
+
+    {:ok, completed} =
+      Event.new(
+        :tool_completed,
+        Map.merge(tool_attrs(run_id), %{status: :ok, metadata: %{}, content: content})
+      )
+
+    assert Wire.event(run_id, 2, completed, config)
+           |> decode_frame!()
+           |> get_in(["payload", "event", "content"]) == content
+
+    {:ok, limits} =
+      Synapse.Tool.Limits.new(max_argument_json_bytes: 32, max_result_content_bytes: 256)
+
+    {:ok, runtime_options} = Synapse.Runtime.Options.new(tool_limits: limits)
+    lowered = config(runtime_options: runtime_options)
+
+    oversized_arguments = %{"value" => String.duplicate("x", 32)}
+
+    {:ok, started} =
+      Event.new(:tool_started, Map.put(tool_attrs(run_id), :arguments, oversized_arguments))
+
+    assert {:error, :invalid_message} = Wire.event(run_id, 3, started, lowered)
+
+    oversized_content = String.duplicate("x", 257)
+
+    {:ok, completed} =
+      Event.new(
+        :tool_completed,
+        Map.merge(tool_attrs(run_id), %{
+          status: :ok,
+          metadata: %{},
+          content: oversized_content
+        })
+      )
+
+    assert {:error, :invalid_message} = Wire.event(run_id, 4, completed, lowered)
+  end
+
   test "rejects invalid snapshot combinations and outgoing inputs" do
     config = config()
     run_id = run_id()
@@ -944,12 +1029,17 @@ defmodule Synapse.API.WireTest do
     assert {:error, :invalid_message} = Wire.pong("request-1", malformed_config)
   end
 
-  defp config do
+  defp config(overrides \\ []) do
     {:ok, config} =
       Config.new(
-        enabled: true,
-        launch_cwd: "/synthetic/api-wire-launch",
-        default_model: "model-a"
+        Keyword.merge(
+          [
+            enabled: true,
+            launch_cwd: "/synthetic/api-wire-launch",
+            default_model: "model-a"
+          ],
+          overrides
+        )
       )
 
     config

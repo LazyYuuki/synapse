@@ -11,7 +11,10 @@ import {
   type RunControllerDependencies,
 } from './run.svelte';
 import { createServerErrorNotices } from './server-errors.svelte';
-import type { StartCommandInput } from '../protocol/encode';
+import { encodeStartCommand, type StartCommandInput } from '../protocol/encode';
+import { LIMITS } from '../protocol/constants';
+import type { ConversationMessage } from '../protocol/types';
+import { utf8ByteLength } from '../protocol/validation';
 
 export type ClientControllerOptions = {
   createConnection(callbacks: ConnectionCallbacks): ConnectionController;
@@ -63,7 +66,15 @@ export function createClientControllers(options: ClientControllerOptions) {
     if (!canStartRun())
       return actionFailure('run_active', 'A current or restored run blocks start.');
     errors.clear();
-    return connection.startRun(input);
+    const conversation = conversationFor(run.runs, input);
+    const result = connection.startRun(
+      conversation.length > 0 ? { ...input, conversation } : input,
+    );
+    if (result.ok && run.current?.terminal && !run.prepareNext()) {
+      connection.failProtocol();
+      return actionFailure('run_active', 'The sent follow-up could not archive its prior run.');
+    }
+    return result;
   }
 
   function cancelRun(): SendCommandResult {
@@ -76,7 +87,11 @@ export function createClientControllers(options: ClientControllerOptions) {
   }
 
   function canStartRun(): boolean {
-    return connection.canStart && run.current === null && run.restoredRunId === null;
+    return (
+      connection.canStart &&
+      (run.current === null || run.canPrepareNext) &&
+      (run.restoredRunId === null || run.current?.terminal !== null)
+    );
   }
 
   return {
@@ -111,6 +126,44 @@ export function createClientControllers(options: ClientControllerOptions) {
       connection.destroy();
     },
   };
+}
+
+function conversationFor(
+  runs: ReturnType<typeof createRunController>['runs'],
+  input: Omit<StartCommandInput, 'requestId'>,
+): ConversationMessage[] {
+  const pairs: ConversationMessage[][] = [];
+  for (const run of runs) {
+    if (run.start && run.terminal?.status === 'completed') {
+      pairs.push([
+        { role: 'user', content: run.start.payload.prompt },
+        { role: 'assistant', content: run.terminal.result.text },
+      ]);
+    }
+  }
+
+  const selected: ConversationMessage[][] = [];
+  let bytes = 0;
+  for (let index = pairs.length - 1; index >= 0; index -= 1) {
+    const pair = pairs[index];
+    const pairBytes = pair.reduce((total, message) => total + utf8ByteLength(message.content), 0);
+    const candidate = [pair, ...selected].flat();
+    const encoded = encodeStartCommand({
+      ...input,
+      requestId: 'x'.repeat(LIMITS.requestIdBytes),
+      conversation: candidate,
+    });
+    if (
+      candidate.length > LIMITS.conversationMessages ||
+      bytes + pairBytes > LIMITS.conversationBytes ||
+      !encoded.ok
+    ) {
+      break;
+    }
+    selected.unshift(pair);
+    bytes += pairBytes;
+  }
+  return selected.flat();
 }
 
 export type ClientControllers = ReturnType<typeof createClientControllers>;

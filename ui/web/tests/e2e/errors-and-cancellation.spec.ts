@@ -62,6 +62,13 @@ const errorCases: readonly {
     guidance: 'The server already has an active run. Wait for it to settle before trying again.',
   },
   {
+    code: 'token_limit_exceeded',
+    message: 'Estimated input exceeds the 272000 token context limit',
+    retryable: false,
+    requestId: 'required',
+    guidance: 'This message would exceed the 272,000-token application context limit.',
+  },
+  {
     code: 'run_not_found',
     message: 'Run was not found',
     retryable: false,
@@ -98,7 +105,7 @@ const errorCases: readonly {
   },
 ];
 
-test('renders fixed safe guidance for every stable server error', async ({
+test('renders fixed guidance and exact validated traces for every stable server error', async ({
   page,
   socketServer,
 }) => {
@@ -133,7 +140,7 @@ test('renders fixed safe guidance for every stable server error', async ({
     const notices = page.locator('.status-stack');
     await expect(notices).toContainText(errorCase.guidance);
     await expect(notices).not.toContainText(errorCase.message);
-    await expect(page.locator('body')).not.toContainText(errorCase.message);
+    await expect(page.locator('.chat-timeline')).toContainText(errorCase.message);
     await expect(page.getByLabel(/Prompt/)).toHaveValue('Retain this draft');
   }
 

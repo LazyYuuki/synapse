@@ -155,6 +155,7 @@ export const eventFixtures: [string, object][] = [
       call_id: 'call-1',
       name: 'read',
       ordinal: 1,
+      arguments: { path: 'mix.exs' },
     },
   ],
   [
@@ -168,6 +169,7 @@ export const eventFixtures: [string, object][] = [
       ordinal: 1,
       status: 'ok',
       metadata: { tool: 'read', outcome: 'completed' },
+      content: '{"content":"example"}',
     },
   ],
   [
@@ -230,6 +232,15 @@ export const errorFixtures: [string, string | null, object][] = [
     'run_busy',
     REQUEST_ID,
     { code: 'run_busy', message: 'A run is already active', retryable: true },
+  ],
+  [
+    'token_limit_exceeded',
+    REQUEST_ID,
+    {
+      code: 'token_limit_exceeded',
+      message: 'Estimated input exceeds the 272000 token context limit',
+      retryable: false,
+    },
   ],
   [
     'run_not_found',

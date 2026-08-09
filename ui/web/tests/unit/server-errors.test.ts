@@ -10,7 +10,7 @@ import type { ServerErrorCode, ServerErrorMessage } from '../../src/lib/protocol
 
 describe('fixed server error guidance', () => {
   it.each(Object.keys(SERVER_ERROR_SPECS) as ServerErrorCode[])(
-    'maps %s without retaining server prose',
+    'maps %s and retains the exact validated error envelope',
     (code) => {
       const controller = createServerErrorNotices();
       const spec = SERVER_ERROR_SPECS[code];
@@ -28,7 +28,7 @@ describe('fixed server error guidance', () => {
         guidance: SERVER_ERROR_GUIDANCE[code].guidance,
         retryable: spec.retryable,
       });
-      expect(JSON.stringify(controller.notice)).not.toContain(spec.message);
+      expect(controller.notice?.trace).toEqual(message);
     },
   );
 

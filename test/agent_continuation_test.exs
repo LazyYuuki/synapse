@@ -194,14 +194,18 @@ defmodule Synapse.Agent.ContinuationTest do
 
     {:ok, admission} = Admission.preflight(first_response, Limits.default(), 50, 64_000)
 
+    [read_result, write_result, bash_result] = [
+      present(Enum.at(calls, 0), {:ok, read_outcome}),
+      present(Enum.at(calls, 1), {:ok, write_outcome}),
+      present(Enum.at(calls, 2), {:ok, bash_outcome})
+    ]
+
     result_bytes =
-      [
-        present(Enum.at(calls, 0), {:ok, read_outcome}),
-        present(Enum.at(calls, 1), {:ok, write_outcome}),
-        present(Enum.at(calls, 2), {:ok, bash_outcome})
-      ]
-      |> Enum.map(&byte_size(&1.content))
-      |> Enum.sum()
+      Enum.sum(Enum.map([read_result, write_result, bash_result], &byte_size(&1.content)))
+
+    read_arguments = Enum.at(calls, 0).arguments
+    write_arguments = Enum.at(calls, 1).arguments
+    bash_arguments = Enum.at(calls, 2).arguments
 
     assert result.output_bytes ==
              admission.output_bytes + result_bytes + byte_size(result.text)
@@ -216,40 +220,46 @@ defmodule Synapse.Agent.ContinuationTest do
                call_id: "call-read",
                name: "read",
                ordinal: 1,
-               operation_id: read_id
+               operation_id: read_id,
+               arguments: ^read_arguments
              },
              %Event.ToolCompleted{
                call_id: "call-read",
                name: "read",
                ordinal: 1,
                operation_id: read_id,
-               status: :ok
+               status: :ok,
+               content: read_content
              },
              %Event.ToolStarted{
                call_id: "call-write",
                name: "write",
                ordinal: 2,
-               operation_id: write_id
+               operation_id: write_id,
+               arguments: ^write_arguments
              },
              %Event.ToolCompleted{
                call_id: "call-write",
                name: "write",
                ordinal: 2,
                operation_id: write_id,
-               status: :ok
+               status: :ok,
+               content: write_content
              },
              %Event.ToolStarted{
                call_id: "call-bash",
                name: "bash",
                ordinal: 3,
-               operation_id: bash_id
+               operation_id: bash_id,
+               arguments: ^bash_arguments
              },
              %Event.ToolCompleted{
                call_id: "call-bash",
                name: "bash",
                ordinal: 3,
                operation_id: bash_id,
-               status: :ok
+               status: :ok,
+               content: bash_content
              },
              %Event.TurnCompleted{
                turn: 1,
@@ -266,6 +276,10 @@ defmodule Synapse.Agent.ContinuationTest do
              },
              %Event.RunCompleted{result: ^result}
            ] = collect_events([])
+
+    assert read_content == read_result.content
+    assert write_content == write_result.content
+    assert bash_content == bash_result.content
 
     assert run_id == run.id
     assert [first_provider_id, second_provider_id] == provider_ids

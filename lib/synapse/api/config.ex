@@ -15,10 +15,13 @@ defmodule Synapse.API.Config do
   tests. Disabled configuration does not require a model, which keeps ordinary
   application startup independent of server environment.
 
-  The incoming prompt ceiling is lower than `Synapse.Run.Request`'s core ceiling
-  because the complete escaped `run.start` command must fit one incoming message.
-  Output, projection, pull, replay, and retained-state limits are similarly
-  checked as one compatible policy rather than accepted independently.
+  The incoming prompt ceiling is lower than `Synapse.Run.Request`'s core ceiling.
+  The complete encoded `run.start`, including optional conversation history, must
+  still fit one incoming message. Config also derives a fixed model-input estimate
+  from trusted instructions and static Tool schemas; only numeric fixed and
+  maximum token counts cross into the authority-free API Policy. Output,
+  projection, pull, replay, and retained-state limits are similarly checked as one
+  compatible policy rather than accepted independently.
 
   See the [local API guide](api.html) for the complete limit table, trust boundary,
   startup behavior, and protocol consequences.
@@ -30,9 +33,10 @@ defmodule Synapse.API.Config do
       {false, {127, 0, 0, 1}, 4848}
   """
 
+  alias Synapse.Agent.ContextWindow
   alias Synapse.Budget
   alias Synapse.Runtime.Options
-  alias Synapse.Tool.{CapabilitySet, Validation}
+  alias Synapse.Tool.{CapabilitySet, Registry, Validation}
 
   @loopback {127, 0, 0, 1}
   @default_port 4_848
@@ -50,6 +54,7 @@ defmodule Synapse.API.Config do
     max_incoming_message_bytes: 2_097_152,
     max_incoming_frame_payload_bytes: 2_097_152,
     max_outgoing_message_bytes: 3_276_800,
+    max_input_tokens: 272_000,
     max_prompt_bytes: 262_144,
     max_request_id_bytes: 128,
     max_run_id_bytes: 64,
@@ -99,9 +104,11 @@ defmodule Synapse.API.Config do
   ]
   @limit_fields Map.keys(@limit_defaults)
   @allowed_fields @policy_fields ++ @limit_fields
+  @derived_fields [:fixed_input_tokens]
+  @struct_fields @allowed_fields ++ @derived_fields
 
-  @enforce_keys @allowed_fields
-  defstruct @allowed_fields
+  @enforce_keys @struct_fields
+  defstruct @struct_fields
 
   @typedoc "Fixed IPv4 loopback address accepted by the MVP."
   @type loopback_ip :: {127, 0, 0, 1}
@@ -120,6 +127,8 @@ defmodule Synapse.API.Config do
           max_incoming_message_bytes: pos_integer(),
           max_incoming_frame_payload_bytes: pos_integer(),
           max_outgoing_message_bytes: pos_integer(),
+          max_input_tokens: pos_integer(),
+          fixed_input_tokens: pos_integer(),
           max_prompt_bytes: pos_integer(),
           max_request_id_bytes: pos_integer(),
           max_run_id_bytes: pos_integer(),
@@ -171,6 +180,11 @@ defmodule Synapse.API.Config do
          {:ok, budget} <- normalize_budget(values.budget),
          {:ok, capabilities} <- normalize_capabilities(values.capabilities),
          {:ok, runtime_options} <- normalize_runtime_options(values.runtime_options),
+         {:ok, fixed_input_tokens} <-
+           ContextWindow.fixed_input_tokens(
+             runtime_options.instructions,
+             Registry.specifications()
+           ),
          :ok <- validate_api_budget(budget),
          :ok <- validate_limits(values),
          {:ok, model_allowlist, default_model} <- normalize_models(values),
@@ -180,6 +194,7 @@ defmodule Synapse.API.Config do
              budget: budget,
              capabilities: capabilities,
              runtime_options: runtime_options,
+             fixed_input_tokens: fixed_input_tokens,
              model_allowlist: model_allowlist,
              default_model: default_model
            }),
@@ -207,8 +222,10 @@ defmodule Synapse.API.Config do
 
   @doc "Returns whether a Config struct passes complete normalization."
   @spec valid?(term()) :: boolean()
-  def valid?(%__MODULE__{} = config),
-    do: match?({:ok, %__MODULE__{}}, new(Map.from_struct(config)))
+  def valid?(%__MODULE__{} = config) do
+    attrs = config |> Map.from_struct() |> Map.drop(@derived_fields)
+    match?({:ok, ^config}, new(attrs))
+  end
 
   def valid?(_config), do: false
 
@@ -399,6 +416,7 @@ defmodule Synapse.API.Config do
        )},
       {:max_projection_text_bytes,
        values.max_projection_text_bytes >= values.budget.max_output_bytes},
+      {:max_input_tokens, values.fixed_input_tokens < values.max_input_tokens},
       {:max_pull_bytes, values.max_pull_bytes == values.max_outgoing_message_bytes},
       {:max_replay_bytes,
        values.max_replay_bytes >=

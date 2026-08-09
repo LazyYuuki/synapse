@@ -61,7 +61,7 @@ defmodule Synapse.API.Wire do
   }
 
   alias Synapse.Runtime.Error, as: RuntimeError
-  alias Synapse.Tool.Validation
+  alias Synapse.Tool.{Limits, Validation}
 
   @snapshot_fields [
     :mode,
@@ -80,6 +80,8 @@ defmodule Synapse.API.Wire do
     unknown_type: {"unknown_type", "Command type is not supported", false},
     invalid_request_id: {"invalid_request_id", "Request ID is invalid", false},
     invalid_payload: {"invalid_payload", "Command payload is invalid", false},
+    token_limit_exceeded:
+      {"token_limit_exceeded", "Estimated input exceeds the 272000 token context limit", false},
     run_busy: {"run_busy", "A run is already active", true},
     run_not_found: {"run_not_found", "Run was not found", false},
     invalid_cursor: {"invalid_cursor", "Run cursor is invalid", false},
@@ -355,8 +357,9 @@ defmodule Synapse.API.Wire do
 
   defp event_payload(run_id, %ToolStarted{} = event, config) do
     with true <- normalized_event?(:tool_started, event, run_id),
-         true <- valid_tool?(event, config) do
-      {:ok, tool_payload("tool.started", event)}
+         true <- valid_tool?(event, config),
+         true <- valid_tool_arguments?(event.arguments, config) do
+      {:ok, Map.put(tool_payload("tool.started", event), "arguments", event.arguments)}
     else
       false -> {:error, :invalid_message}
     end
@@ -365,11 +368,13 @@ defmodule Synapse.API.Wire do
   defp event_payload(run_id, %ToolCompleted{} = event, config) do
     with true <- normalized_event?(:tool_completed, event, run_id),
          true <- valid_tool?(event, config),
+         true <- valid_tool_content?(event.content, config),
          status when is_binary(status) <- tool_status(event.status) do
       payload =
         tool_payload("tool.completed", event)
         |> Map.put("status", status)
         |> Map.put("metadata", public_tool_metadata(event))
+        |> Map.put("content", event.content)
 
       {:ok, payload}
     else
@@ -425,6 +430,27 @@ defmodule Synapse.API.Wire do
 
     match?({:ok, %ActiveTool{}}, ActiveTool.new(attrs, config))
   end
+
+  defp valid_tool_arguments?(arguments, config) do
+    limits = tool_limits(config)
+
+    Validation.bounded_json_object?(
+      arguments,
+      limits.max_argument_json_bytes,
+      limits.max_argument_entries,
+      limits.max_argument_depth
+    )
+  end
+
+  defp valid_tool_content?(content, config) do
+    limits = tool_limits(config)
+
+    is_binary(content) and String.valid?(content) and
+      byte_size(content) <= limits.max_result_content_bytes
+  end
+
+  defp tool_limits(%Config{} = config), do: config.runtime_options.tool_limits
+  defp tool_limits(%Policy{}), do: Limits.default()
 
   defp tool_payload(type, event) do
     %{

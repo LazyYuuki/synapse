@@ -258,6 +258,7 @@ defmodule Synapse.API.RunSession do
            Request.new(
              id: run_id,
              prompt: command.prompt,
+             conversation: command.conversation,
              cwd: command.cwd,
              model: command.model,
              capabilities: capabilities,

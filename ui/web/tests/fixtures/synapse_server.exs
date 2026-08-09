@@ -514,7 +514,11 @@ defmodule Synapse.WebFixture.Main do
 
     {:ok, listener} = Synapse.API.Supervisor.listener(api)
     {:ok, {{127, 0, 0, 1}, port}} = ThousandIsland.listener_info(listener)
-    {:ok, stable_config} = Synapse.API.Config.new(Map.put(Map.from_struct(config), :port, port))
+
+    stable_options =
+      config |> Map.from_struct() |> Map.drop([:fixed_input_tokens]) |> Map.put(:port, port)
+
+    {:ok, stable_config} = Synapse.API.Config.new(stable_options)
     IO.puts("READY ws://127.0.0.1:#{port}/v1/socket")
     parent = self()
     spawn_link(fn -> read_commands(parent) end)

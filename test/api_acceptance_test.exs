@@ -345,23 +345,26 @@ defmodule Synapse.API.AcceptanceTest do
       [accepted] ++
         first ++ replay ++ [replay_snapshot, stale, listener_replay] ++ live ++ remaining
 
-    forbidden = [
+    frame_forbidden = [
       @credential,
       @prompt,
       root,
-      "SYNAPSE_API_FIXTURE",
-      "phase-7",
-      "VERIFIED",
       @provider_response,
       @callback_sentinel,
       inspect(runtime_run.run_ref),
       inspect(runtime_run.cancel_ref)
     ]
 
-    Enum.each(forbidden, fn sentinel ->
+    Enum.each(frame_forbidden, fn sentinel ->
       refute Enum.any?(frames, &(JSON.encode!(&1) =~ sentinel))
       refute log =~ sentinel
       refute listener_log =~ sentinel
+    end)
+
+    Enum.each(["SYNAPSE_API_FIXTURE", "phase-7", "VERIFIED"], fn tool_content ->
+      assert Enum.any?(frames, &(JSON.encode!(&1) =~ tool_content))
+      refute log =~ tool_content
+      refute listener_log =~ tool_content
     end)
 
     refute log =~ @final_text

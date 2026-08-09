@@ -124,9 +124,10 @@ test('reconnects without cancellation, catches up replay, then accepts a stale-c
       delta: 'Live continuation.',
     }),
   );
-  await expect(page.getByRole('textbox', { name: 'Assistant output' })).toHaveText(
-    'Hello from replay. Live continuation.',
-  );
+  await expect(page.getByRole('textbox', { name: 'Assistant output' })).toHaveCount(2);
+  expect(
+    (await page.getByRole('textbox', { name: 'Assistant output' }).allTextContents()).join(''),
+  ).toBe('Hello from replay. Live continuation.');
 
   const thirdArrival = socketServer.nextConnection();
   await second.close(1_012);
@@ -158,12 +159,18 @@ test('reconnects without cancellation, catches up replay, then accepts a stale-c
   );
 
   await expect(page.getByText('History reset')).toBeVisible();
-  await expect(page.getByText(/Earlier activity is unavailable/)).toBeVisible();
+  const traceBoundary = page
+    .locator('.collapsible-bubble')
+    .filter({ hasText: 'Trace boundary' })
+    .locator(':scope > summary');
+  await traceBoundary.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByText(/Earlier live events are unavailable/)).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Assistant output' })).toHaveText(
     'Authoritative reset state',
   );
   await expect(page.locator('.run-metadata')).toContainText('12');
-  await expect(page.getByText('No retained activity')).toBeVisible();
+  await expect(page.getByText('Trace boundary')).toBeVisible();
   await third.send(
     runEvent(13, {
       type: 'text.delta',
@@ -174,9 +181,10 @@ test('reconnects without cancellation, catches up replay, then accepts a stale-c
       delta: ' + live',
     }),
   );
-  await expect(page.getByRole('textbox', { name: 'Assistant output' })).toHaveText(
-    'Authoritative reset state + live',
-  );
+  await expect(page.getByRole('textbox', { name: 'Assistant output' })).toHaveCount(2);
+  expect(
+    (await page.getByRole('textbox', { name: 'Assistant output' }).allTextContents()).join(''),
+  ).toBe('Authoritative reset state + live');
   await page.getByText('Protocol inspector').click();
   const resetEntries = page.locator('.protocol-entry-heading');
   await expect(resetEntries.nth(-2)).toContainText('reset');
@@ -238,12 +246,9 @@ test('restores a completed snapshot without duplicating terminal presentation', 
   await expect(page.getByRole('textbox', { name: 'Assistant output' })).toHaveText(
     'Restored completed result',
   );
-  await expect(page.getByRole('region', { name: 'Completed' })).not.toContainText(
-    'Restored completed result',
-  );
-  await expect(page.getByText('Restored completed result')).toHaveCount(1);
+  await expect(page.locator('.assistant-text')).toHaveText('Restored completed result');
   await expect(page.getByRole('status')).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'New run' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Start run' })).toBeEnabled();
   second.assertNoQueuedCommands();
 });
 

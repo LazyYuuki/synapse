@@ -4,7 +4,7 @@ Synapse Web is the standalone browser client for Synapse's local protocol-v1 API
 It is a static Svelte 5 application built by Vite under `ui/web`; the Elixir
 application neither builds nor serves these files.
 
-The implemented client is a responsive interactive operator console with
+The implemented client is a responsive multi-turn chat console with
 deterministic scripted acceptance, real Synapse integration, browser hardening,
 and explicit opt-in live Tokamak acceptance.
 It still opens no WebSocket on mount: Connect, Start, Cancel, Disconnect, Reconnect,
@@ -189,6 +189,9 @@ diagnostics in `protocol-timeline.svelte.ts`.
 - A run ID is installed only from correlated `run.accepted`, starts at cursor zero,
   and is the only run value retained in `sessionStorage`. Prompt, path, model,
   output, events, terminal, cursor, and diagnostics remain memory-only.
+- The exact sent Start command, exact successfully applied Run events, and terminal
+  are retained in bounded memory for chat projection. A settled run moves into a
+  64-run session archive only when the next message is sent.
 - One pure reducer handles initial live delivery, retained replay, and resumed live
   delivery. It applies only the exact next sequence and validates turn, Tool,
   owner-loss cleanup, UTF-8 text, and safe aggregate transitions before one atomic
@@ -212,10 +215,11 @@ diagnostics in `protocol-timeline.svelte.ts`.
 - A lost cancellation response also requires snapshot recovery because cancellation
   does not consume sequence. A correlated `run_not_found` explains process-lifetime
   loss, removes stale restoration, and never synthesizes a terminal or resends start.
-- Activity and protocol summaries are each bounded to 500 entries and one encoded
-  MiB. Oldest diagnostics are evicted without changing projection or cursor. Raw
-  frame strings, assistant deltas duplicated as diagnostics, start content, Tool
-  arguments, and server exception text are never retained.
+- Exact chat events are bounded to 8,192 entries and eight encoded MiB per run;
+  oldest trace entries are evicted without changing projection or cursor. Activity
+  and sanitized protocol summaries remain independently bounded to 500 entries and
+  one encoded MiB. Raw frame strings and unvalidated browser exceptions are never
+  retained.
 
 ## Interactive Controls
 
@@ -234,46 +238,51 @@ mapping outside presentation in `composer.ts` and `server-errors.svelte.ts`.
   correlated acceptance, Prompt is cleared while Workspace path, Model, and Budget
   remain in memory. Submitted fields are locked while admission is pending so a late
   response cannot erase replacement text.
-- Start is blocked by any current or restored run and is never automatically retried
-  after ambiguity. Accepted cancellation is idempotent in both action and UI state;
+- Start is blocked by an active or restored run and is never automatically retried
+  after ambiguity. A settled run permits a follow-up without clearing the visible
+  session. Accepted cancellation is idempotent in both action and UI state;
   command send, intent acknowledgement, and terminal settlement are displayed as
   separate states.
-- New Run is available only after terminal settlement or confirmed `run_not_found`.
-  On a ready connection it replaces the socket, releasing completed-run
-  subscriptions because protocol v1 has no unsubscribe command.
-- Every stable `server.error` maps to fixed local guidance by retryable admission,
-  protocol, run-state, or internal category. Ordinary notices never render wire
-  prose, browser exceptions, rejected values, or raw frames. The explicit inspector
-  shows only bounded sanitized protocol summaries.
+- A follow-up archives the settled run, starts an independent Runtime run, and sends
+  newest complete successful user/assistant pairs in optional `conversation`.
+  History is bounded to 128 messages and 1,572,864 UTF-8 content bytes. Failed and
+  interrupted runs remain visible but are not projected into model history.
+- Every stable `server.error`, including `token_limit_exceeded`, maps to fixed local
+  guidance. Its validated envelope is available only through the explicit bubble
+  trace disclosure; browser exceptions and raw frames remain excluded.
 
 `App.svelte` mounts the composed controllers to establish lifecycle ownership, but
 the initial page remains disconnected until the user activates Connect.
 
 ## Run Presentation
 
-Phase 6 renders the validated run projection through focused components under
+The chat timeline renders validated commands, events, and terminals through focused components under
 `src/lib/components`.
 
-- Assistant output and successful Result text use one escaped, whitespace-preserving
-  plain-text value. No Markdown, syntax highlighting, `{@html}`, hidden reasoning, or
-  per-token DOM nodes are used.
-- The bounded output viewport follows new text only while already near its bottom.
-  Scrolling upward preserves the reader's position and exposes an explicit Jump to
-  latest action; a different run resets follow state.
-- Active and retained Tool activity shows only protocol-v1 name, turn, ordinal,
-  status, and public outcome fields. Arguments, command output, file changes, and
-  inferred success are never presented.
-- Terminal cards distinguish successful Result, Agent, Runtime, and API settlement.
+- Assistant text uses escaped, whitespace-preserving plain text. Contiguous deltas
+  share one node and Tool boundaries create chronological answer segments. No
+  Markdown, syntax highlighting, `{@html}`, or hidden reasoning is used.
+- Provider, Tool call, Tool Result, answer, settlement, and error bubbles remain in
+  source order. The status buffer distinguishes Provider activity, Tool execution,
+  completion, failure, interruption, cancellation, and owner loss.
+- Tool bubbles expose the exact decoded arguments and exact model-visible Result
+  content supplied by protocol v1. They do not infer filesystem changes or success
+  beyond validated wire fields.
+- Terminal bubbles distinguish successful Result, Agent, Runtime, and API settlement.
   `runtime_lost` explicitly states that final cleanup settlement was not observed;
   other terminals state confirmed settlement. One concise status or alert announces
   terminal arrival without reading the complete Result or stealing focus.
-- The protocol inspector presents validated envelopes in source order with direction,
+- Every bubble has an accessible API trace disclosure containing its exact retained
+  validated command, event, or terminal JSON. This intentionally includes prompts,
+  Workspace paths, assistant text, Tool data, and stable error details, but excludes
+  credentials, authority objects, raw frames, and opaque browser internals.
+- The separate protocol inspector presents sanitized envelopes in source order with direction,
   command-response/asynchronous role, and replay/snapshot/reset markers. Prompt,
   advertised or submitted Workspace path, assistant and Result text, error-detail
   values, and raw frames are replaced by bounded summaries before display or
   explicit copy.
-- Run ID and diagnostics clipboard writes require explicit actions. New Run clears
-  stale copy feedback and returns keyboard focus to the retained Workspace field.
+- Run ID and diagnostics clipboard writes require explicit actions. Clearing the
+  memory-only session returns keyboard focus to the retained Workspace field.
 
 ## Deterministic Browser Acceptance
 

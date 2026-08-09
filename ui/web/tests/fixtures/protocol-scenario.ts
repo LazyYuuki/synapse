@@ -6,6 +6,8 @@ import type {
   RunSnapshotMessage,
   RunTerminalMessage,
   Terminal,
+  ToolCompletedEvent,
+  ToolStartedEvent,
 } from '../../src/lib/protocol/types.js';
 
 export const RUN_ID = 'run_AAAAAAAAAAAAAAAAAAAAAA';
@@ -19,12 +21,21 @@ export function accepted(requestId: string): RunAcceptedMessage {
   };
 }
 
-export function runEvent(seq: number, event: RunEvent): RunEventMessage {
+type ScenarioRunEvent =
+  RunEvent | Omit<ToolStartedEvent, 'arguments'> | Omit<ToolCompletedEvent, 'content'>;
+
+export function runEvent(seq: number, event: ScenarioRunEvent): RunEventMessage {
+  const completeEvent: RunEvent =
+    event.type === 'tool.started' && !('arguments' in event)
+      ? { ...event, arguments: {} }
+      : event.type === 'tool.completed' && !('content' in event)
+        ? { ...event, content: '' }
+        : event;
   return {
     version: 1,
     type: 'run.event',
     request_id: null,
-    payload: { run_id: RUN_ID, seq, event },
+    payload: { run_id: RUN_ID, seq, event: completeEvent },
   };
 }
 

@@ -295,6 +295,7 @@ export function createConnectionController(
         cwd: input.cwd,
         model: input.model,
         budget: input.budget,
+        conversation: input.conversation,
       }),
     );
   }

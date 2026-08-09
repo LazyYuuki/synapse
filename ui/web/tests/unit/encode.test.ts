@@ -18,6 +18,10 @@ describe('protocol command encoding', () => {
       cwd: '/tmp/project',
       model: 'model-a',
       budget: { max_turns: 3, max_provider_retries: 0 },
+      conversation: [
+        { role: 'user', content: 'Earlier question' },
+        { role: 'assistant', content: 'Earlier answer' },
+      ],
       provider: 'forbidden-provider',
       capability: true,
       TOKAMAK_API_KEY: 'must-not-cross',
@@ -36,6 +40,10 @@ describe('protocol command encoding', () => {
           cwd: '/tmp/project',
           model: 'model-a',
           budget: { max_turns: 3, max_provider_retries: 0 },
+          conversation: [
+            { role: 'user', content: 'Earlier question' },
+            { role: 'assistant', content: 'Earlier answer' },
+          ],
         },
       },
       json: JSON.stringify({
@@ -47,6 +55,10 @@ describe('protocol command encoding', () => {
           cwd: '/tmp/project',
           model: 'model-a',
           budget: { max_turns: 3, max_provider_retries: 0 },
+          conversation: [
+            { role: 'user', content: 'Earlier question' },
+            { role: 'assistant', content: 'Earlier answer' },
+          ],
         },
       }),
     });
@@ -69,6 +81,84 @@ describe('protocol command encoding', () => {
     expect(result.ok).toBe(true);
     if (result.ok)
       expect(result.command.payload).toEqual({ prompt: 'Inspect', cwd: '/tmp/project' });
+  });
+
+  it('accepts exactly 16 complete conversation pairs at the aggregate UTF-8 boundary', () => {
+    const conversation = Array.from({ length: LIMITS.conversationMessages }, (_, index) => ({
+      role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+      content: 'é'.repeat(LIMITS.conversationBytes / 2 / LIMITS.conversationMessages),
+    }));
+
+    const result = encodeStartCommand({
+      requestId: REQUEST_ID,
+      prompt: 'Continue',
+      cwd: '/tmp/project',
+      conversation,
+    });
+
+    expect(
+      conversation.reduce(
+        (bytes, message) => bytes + new TextEncoder().encode(message.content).byteLength,
+        0,
+      ),
+    ).toBe(LIMITS.conversationBytes);
+    expect(result).toMatchObject({ ok: true, command: { payload: { conversation } } });
+  });
+
+  it.each([
+    ['an incomplete pair', [{ role: 'user', content: 'question' }]],
+    [
+      'wrong alternation',
+      [
+        { role: 'assistant', content: 'answer' },
+        { role: 'user', content: 'question' },
+      ],
+    ],
+    [
+      'more than 32 messages',
+      Array.from({ length: LIMITS.conversationMessages + 2 }, (_, index) => ({
+        role: index % 2 === 0 ? 'user' : 'assistant',
+        content: 'x',
+      })),
+    ],
+    [
+      'aggregate content over the byte limit',
+      [
+        { role: 'user', content: 'é'.repeat(LIMITS.conversationBytes / 2) },
+        { role: 'assistant', content: 'x' },
+      ],
+    ],
+    [
+      'an extra message key',
+      [
+        { role: 'user', content: 'question', name: 'forbidden' },
+        { role: 'assistant', content: 'answer' },
+      ],
+    ],
+    [
+      'malformed Unicode content',
+      [
+        { role: 'user', content: '\ud800' },
+        { role: 'assistant', content: 'answer' },
+      ],
+    ],
+    [
+      'blank content',
+      [
+        { role: 'user', content: '\u0085' },
+        { role: 'assistant', content: 'answer' },
+      ],
+    ],
+    ['a non-array value', { role: 'user', content: 'question' }],
+  ])('rejects conversation with %s', (_label, conversation) => {
+    expect(
+      encodeStartCommand({
+        requestId: REQUEST_ID,
+        prompt: 'Continue',
+        cwd: '/tmp/project',
+        conversation: conversation as never,
+      }),
+    ).toMatchObject({ ok: false, error: { code: 'invalid_conversation' } });
   });
 
   it('encodes cancel, subscribe, and ping with exact payloads', () => {

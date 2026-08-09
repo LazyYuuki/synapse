@@ -10,9 +10,9 @@ defmodule Synapse.Run.Event do
   contract.
 
   Every event carries a run ID. Turn and operation events carry their explicit
-  identities. Tool completion exposes typed status and allowlisted safe metadata,
-  never Tool Result content or arguments. Terminal events carry validated Agent
-  Result or Error contracts.
+  identities. Tool events expose the exact bounded model-visible arguments and
+  result content alongside typed status and allowlisted safe metadata. Terminal
+  events carry validated Agent Result or Error contracts.
 
   TextDelta and RunCompleted are content-bearing despite redacted ordinary
   inspection. The trusted event sink must apply its own logging and persistence
@@ -51,6 +51,10 @@ defmodule Synapse.Run.Event do
   @max_provider_id_bytes 512
   @max_tool_name_bytes 64
   @max_delta_bytes 64_000
+  @max_argument_json_bytes 64_000
+  @max_argument_entries 16
+  @max_argument_depth 4
+  @max_result_content_bytes 64_000
   @max_metadata_bytes 4_096
   @max_metadata_entries 32
   @max_metadata_depth 4
@@ -123,17 +127,34 @@ defmodule Synapse.Run.Event do
   end
 
   def new(:tool_started, attrs) do
-    fields = [:run_id, :turn, :operation_id, :call_id, :name, :ordinal]
+    fields = [:run_id, :turn, :operation_id, :call_id, :name, :ordinal, :arguments]
 
     with {:ok, attrs} <- attrs(attrs, fields),
          :ok <- tool_base(attrs),
-         :ok <- positive(:ordinal, attrs[:ordinal]) do
+         :ok <- positive(:ordinal, attrs[:ordinal]),
+         true <-
+           Validation.bounded_json_object?(
+             attrs[:arguments],
+             @max_argument_json_bytes,
+             @max_argument_entries,
+             @max_argument_depth
+           ) or {:error, {:arguments, :must_be_bounded_string_keyed_json_object}} do
       {:ok, struct!(ToolStarted, attrs)}
     end
   end
 
   def new(:tool_completed, attrs) do
-    fields = [:run_id, :turn, :operation_id, :call_id, :name, :ordinal, :status, :metadata]
+    fields = [
+      :run_id,
+      :turn,
+      :operation_id,
+      :call_id,
+      :name,
+      :ordinal,
+      :status,
+      :metadata,
+      :content
+    ]
 
     with {:ok, attrs} <- attrs(attrs, fields),
          :ok <- tool_base(attrs),
@@ -143,7 +164,8 @@ defmodule Synapse.Run.Event do
              {:error, {:status, :must_be_tool_result_status}},
          true <-
            safe_metadata?(attrs[:metadata]) or
-             {:error, {:metadata, :must_be_bounded_safe_json_object}} do
+             {:error, {:metadata, :must_be_bounded_safe_json_object}},
+         :ok <- bounded_utf8(:content, attrs[:content], @max_result_content_bytes) do
       {:ok, struct!(ToolCompleted, attrs)}
     end
   end
@@ -288,8 +310,13 @@ defmodule Synapse.Run.Event.TextDelta do
 end
 
 defmodule Synapse.Run.Event.ToolStarted do
-  @moduledoc "Announces one admitted Tool immediately before synchronous execution."
-  @enforce_keys [:run_id, :turn, :operation_id, :call_id, :name, :ordinal]
+  @moduledoc """
+  Announces one admitted Tool immediately before synchronous execution.
+
+  `arguments` is the exact decoded string-keyed JSON object admitted from the
+  successful terminal Provider response. It is untrusted model content.
+  """
+  @enforce_keys [:run_id, :turn, :operation_id, :call_id, :name, :ordinal, :arguments]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
@@ -298,17 +325,28 @@ defmodule Synapse.Run.Event.ToolStarted do
           operation_id: String.t(),
           call_id: String.t(),
           name: String.t(),
-          ordinal: pos_integer()
+          ordinal: pos_integer(),
+          arguments: Synapse.Tool.json_object()
         }
 end
 
 defmodule Synapse.Run.Event.ToolCompleted do
   @moduledoc """
-  Reports Agent-produced typed Tool status and bounded local metadata.
-
-  It deliberately contains neither Tool Result content nor model arguments.
+  Reports Agent-produced typed Tool status, exact model-visible Result content,
+  and bounded local metadata. `content` is untrusted and remains redacted from
+  ordinary inspection.
   """
-  @enforce_keys [:run_id, :turn, :operation_id, :call_id, :name, :ordinal, :status, :metadata]
+  @enforce_keys [
+    :run_id,
+    :turn,
+    :operation_id,
+    :call_id,
+    :name,
+    :ordinal,
+    :status,
+    :metadata,
+    :content
+  ]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
@@ -319,7 +357,8 @@ defmodule Synapse.Run.Event.ToolCompleted do
           name: String.t(),
           ordinal: pos_integer(),
           status: Synapse.Tool.Result.status(),
-          metadata: Synapse.Tool.json_object()
+          metadata: Synapse.Tool.json_object(),
+          content: String.t()
         }
 end
 

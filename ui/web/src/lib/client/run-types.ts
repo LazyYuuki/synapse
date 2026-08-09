@@ -1,7 +1,9 @@
 import type {
   ActiveTool,
+  RunEvent,
   RunProjection,
   RunStatus,
+  StartCommand,
   Terminal,
   ToolPublicMetadata,
 } from '../protocol/types';
@@ -50,14 +52,24 @@ export type ReductionKnowledge = {
   ownerLostTool: ActiveTool | null | 'unknown';
 };
 
+export type AppliedRunEvent = {
+  seq: number;
+  event: RunEvent;
+};
+
 export type RunState = {
   runId: string;
+  start: StartCommand | null;
   projection: RunProjectionView;
   terminal: Terminal | null;
   cancelAcknowledged: boolean;
   lastAppliedSeq: number;
   activity: RunActivityEntry[];
   activityBytes: number;
+  events: AppliedRunEvent[];
+  eventBytes: number;
+  traceIncomplete: boolean;
+  traceBaseText: string;
   historyReset: boolean;
   knowledge: ReductionKnowledge;
 };

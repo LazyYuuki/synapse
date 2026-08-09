@@ -7,12 +7,14 @@ import type {
   Budget,
   CancelCommand,
   ClientCommand,
+  ConversationMessage,
   PingCommand,
   StartCommand,
   SubscribeCommand,
 } from './types';
 import {
   hasNonBlankContent,
+  hasExactKeys,
   isBoundedString,
   isIdentifier,
   isPlainObject,
@@ -26,6 +28,7 @@ export type EncodeErrorCode =
   | 'invalid_workspace_path'
   | 'invalid_model'
   | 'invalid_budget'
+  | 'invalid_conversation'
   | 'invalid_run_id'
   | 'invalid_cursor'
   | 'message_too_large';
@@ -44,6 +47,7 @@ export type StartCommandInput = {
   cwd: string;
   model?: string;
   budget?: Partial<Budget>;
+  conversation?: ConversationMessage[];
 };
 
 const messages = {
@@ -52,6 +56,7 @@ const messages = {
   invalid_workspace_path: 'Workspace path must be an absolute bounded path without NUL.',
   invalid_model: 'Model must be blank or a bounded printable identifier.',
   invalid_budget: 'Budget must contain only safe integers within protocol limits.',
+  invalid_conversation: 'Conversation must contain bounded, complete user/assistant pairs.',
   invalid_run_id: 'Run ID must use the canonical protocol-v1 format.',
   invalid_cursor: 'Run cursor must be a non-negative safe integer.',
   message_too_large: 'Command exceeds the protocol byte limit.',
@@ -87,12 +92,16 @@ export function encodeStartCommand(input: StartCommandInput): EncodeResult<Start
   const budget = encodeBudget(input.budget);
   if (budget === false) return failure('invalid_budget');
 
+  const conversation = encodeConversation(input.conversation);
+  if (conversation === false) return failure('invalid_conversation');
+
   const payload: StartCommand['payload'] = {
     prompt: input.prompt,
     cwd: input.cwd,
   };
   if (model !== undefined) payload.model = model;
   if (budget !== undefined) payload.budget = budget;
+  if (conversation !== undefined) payload.conversation = conversation;
 
   const command: StartCommand = {
     version: PROTOCOL_VERSION,
@@ -102,6 +111,38 @@ export function encodeStartCommand(input: StartCommandInput): EncodeResult<Start
   };
 
   return finalize(command);
+}
+
+function encodeConversation(
+  input: ConversationMessage[] | undefined,
+): ConversationMessage[] | undefined | false {
+  if (input === undefined) return undefined;
+  if (
+    !Array.isArray(input) ||
+    input.length % 2 !== 0 ||
+    input.length > LIMITS.conversationMessages
+  ) {
+    return false;
+  }
+
+  let contentBytes = 0;
+  const conversation: ConversationMessage[] = [];
+  for (let index = 0; index < input.length; index += 1) {
+    const message = input[index];
+    const role = index % 2 === 0 ? 'user' : 'assistant';
+    if (
+      !hasExactKeys(message, ['role', 'content']) ||
+      message.role !== role ||
+      !isBoundedString(message.content, LIMITS.conversationBytes - contentBytes) ||
+      !hasNonBlankContent(message.content)
+    ) {
+      return false;
+    }
+    contentBytes += utf8ByteLength(message.content);
+    conversation.push({ role, content: message.content });
+  }
+
+  return conversation;
 }
 
 export function encodeCancelCommand(requestId: string, runId: string): EncodeResult<CancelCommand> {

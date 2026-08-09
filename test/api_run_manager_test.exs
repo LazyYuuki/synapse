@@ -1346,6 +1346,18 @@ defmodule Synapse.API.RunManagerTest do
     command
   end
 
+  defp event(:tool_started, attrs) do
+    {:ok, event} = Event.new(:tool_started, Map.put_new(Map.new(attrs), :arguments, %{}))
+    event
+  end
+
+  defp event(:tool_completed, attrs) do
+    {:ok, event} =
+      Event.new(:tool_completed, Map.put_new(Map.new(attrs), :content, ~s({"status":"ok"})))
+
+    event
+  end
+
   defp event(kind, attrs) do
     {:ok, event} = Event.new(kind, attrs)
     event

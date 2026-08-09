@@ -20,6 +20,27 @@ test('shell has no horizontal overflow at its configured viewport', async ({ pag
   expect(hasOverflow).toBe(false);
 });
 
+test('conversation uses a locked panel with its own scroll viewport', async ({ page }) => {
+  await page.goto('/');
+
+  const layout = await page.locator('.chat-panel').evaluate((panel) => {
+    const timeline = panel.querySelector<HTMLElement>('.chat-timeline');
+    if (!timeline) throw new Error('chat timeline missing');
+    return {
+      panelHeight: panel.getBoundingClientRect().height,
+      panelOverflow: getComputedStyle(panel).overflow,
+      timelineHeight: timeline.getBoundingClientRect().height,
+      timelineOverflowY: getComputedStyle(timeline).overflowY,
+    };
+  });
+
+  expect(layout.panelHeight).toBeGreaterThanOrEqual(520);
+  expect(layout.panelHeight).toBeLessThanOrEqual(780);
+  expect(layout.panelOverflow).toBe('hidden');
+  expect(layout.timelineHeight).toBeGreaterThan(0);
+  expect(layout.timelineOverflowY).toBe('scroll');
+});
+
 test('expanded Budget remains reachable without horizontal overflow', async ({ page }) => {
   await page.goto('/');
   await page.getByText('Advanced budget limits').click();
@@ -85,7 +106,7 @@ test('reduced motion disables smooth output scrolling', async ({ page }) => {
   await page.goto('/');
 
   const scrollBehavior = await page
-    .getByRole('textbox', { name: 'Assistant output' })
+    .locator('.chat-timeline')
     .evaluate((element) => getComputedStyle(element).scrollBehavior);
   expect(scrollBehavior).toBe('auto');
 });

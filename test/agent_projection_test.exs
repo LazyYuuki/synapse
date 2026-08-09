@@ -58,6 +58,38 @@ defmodule Synapse.Agent.ProjectionTest do
     refute Map.has_key?(encoded, "previous_response_id")
   end
 
+  test "projects validated conversation before the current user prompt", %{context: context} do
+    conversation = [
+      %{"role" => "user", "content" => "Earlier question"},
+      %{"role" => "assistant", "content" => "Earlier answer"}
+    ]
+
+    run = run_request("Current question", conversation)
+
+    assert {:ok, state} = Projection.initial_state(run, context, 1_000)
+
+    assert state.input_items == [
+             %{
+               "type" => "message",
+               "role" => "user",
+               "content" => [%{"type" => "input_text", "text" => "Earlier question"}]
+             },
+             %{
+               "type" => "message",
+               "role" => "assistant",
+               "content" => [%{"type" => "output_text", "text" => "Earlier answer"}]
+             },
+             %{
+               "type" => "message",
+               "role" => "user",
+               "content" => [%{"type" => "input_text", "text" => "Current question"}]
+             }
+           ]
+
+    assert {:ok, request} = Projection.provider_request(state, context)
+    assert request.input_items == state.input_items
+  end
+
   test "rebuilding one turn snapshot is equal and mutates neither State nor prior Request", %{
     context: context
   } do
@@ -287,7 +319,7 @@ defmodule Synapse.Agent.ProjectionTest do
     Enum.each(forbidden, &refute(source =~ &1))
   end
 
-  defp run_request(prompt) do
+  defp run_request(prompt, conversation \\ []) do
     {:ok, capabilities} =
       CapabilitySet.new(fs_read: true, fs_write: true, process_exec: true)
 
@@ -295,6 +327,7 @@ defmodule Synapse.Agent.ProjectionTest do
       Request.new(
         id: "run-1",
         prompt: prompt,
+        conversation: conversation,
         cwd: "/synthetic/project",
         model: "test-model",
         capabilities: capabilities,

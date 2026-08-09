@@ -34,9 +34,7 @@ test('drives the real Synapse API, Runtime, Agent, and Tool boundaries', async (
   await expect(page.getByRole('region', { name: 'Active Tool' })).toContainText('write');
   synapseApi.release('write');
   await expect(page.getByRole('region', { name: 'Active Tool' })).toContainText('bash');
-  await expect(page.getByRole('textbox', { name: 'Assistant output' })).toContainText(
-    'No assistant output has arrived.',
-  );
+  await expect(page.locator('.provider-buffer')).toContainText('Tool running / bash');
   synapseApi.release('bash');
 
   await expect(page.getByRole('textbox', { name: 'Assistant output' })).toHaveText(
@@ -49,15 +47,14 @@ test('drives the real Synapse API, Runtime, Agent, and Tool boundaries', async (
   await expect(page.getByRole('textbox', { name: 'Assistant output' })).toHaveText(
     'Synapse fixture completed.',
   );
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('read');
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('write');
-  await expect(page.getByRole('region', { name: 'Activity' })).toContainText('bash');
+  await expect(page.getByRole('region', { name: 'Current run' })).toContainText('read');
+  await expect(page.getByRole('region', { name: 'Current run' })).toContainText('write');
+  await expect(page.getByRole('region', { name: 'Current run' })).toContainText('bash');
   await expect(page.locator('.run-metadata')).toContainText('13');
   await expect(
     page
-      .getByRole('region', { name: 'Completed' })
-      .locator('.terminal-metrics div')
-      .filter({ hasText: 'Tool calls' })
+      .locator('.run-metadata > div')
+      .filter({ has: page.locator('dt', { hasText: 'Tool calls' }) })
       .locator('dd'),
   ).toHaveText('3');
 

@@ -100,7 +100,7 @@ defmodule Synapse.API.Socket do
   alias Synapse.API.Command.{Cancel, Ping, Start, Subscribe}
   alias Synapse.API.{Config, Policy, Protocol, RunManager, Wire}
   alias Synapse.API.Socket.{Arguments, State}
-  alias Synapse.Tool.Validation
+  alias Synapse.Tool.{Limits, Validation}
 
   @continue_pull :synapse_socket_continue_pull
   @agent_kinds %{
@@ -528,14 +528,16 @@ defmodule Synapse.API.Socket do
            "operation_id" => operation_id,
            "call_id" => call_id,
            "name" => name,
-           "ordinal" => ordinal
+           "ordinal" => ordinal,
+           "arguments" => arguments
          } = event,
          policy
        )
        when type == "tool.started",
        do:
-         map_size(event) == 6 and
-           valid_tool_identity?(turn, operation_id, call_id, name, ordinal, policy)
+         map_size(event) == 7 and
+           valid_tool_identity?(turn, operation_id, call_id, name, ordinal, policy) and
+           valid_tool_arguments?(arguments)
 
   defp valid_event_payload?(
          %{
@@ -546,14 +548,16 @@ defmodule Synapse.API.Socket do
            "name" => name,
            "ordinal" => ordinal,
            "status" => status,
-           "metadata" => metadata
+           "metadata" => metadata,
+           "content" => content
          } = event,
          policy
        ),
        do:
-         map_size(event) == 8 and
+         map_size(event) == 9 and
            valid_tool_identity?(turn, operation_id, call_id, name, ordinal, policy) and
-           status in ["ok", "error", "ambiguous"] and valid_tool_metadata?(metadata, name)
+           status in ["ok", "error", "ambiguous"] and valid_tool_metadata?(metadata, name) and
+           valid_tool_content?(content)
 
   defp valid_event_payload?(
          %{
@@ -685,6 +689,22 @@ defmodule Synapse.API.Socket do
   end
 
   defp valid_tool_metadata?(_metadata, _name), do: false
+
+  defp valid_tool_arguments?(arguments) do
+    limits = Limits.default()
+
+    Validation.bounded_json_object?(
+      arguments,
+      limits.max_argument_json_bytes,
+      limits.max_argument_entries,
+      limits.max_argument_depth
+    )
+  end
+
+  defp valid_tool_content?(content) do
+    limits = Limits.default()
+    bounded_string?(content, true, limits.max_result_content_bytes)
+  end
 
   defp bounded_string?(value, empty?, maximum),
     do:

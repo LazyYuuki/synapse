@@ -10,8 +10,13 @@ import {
   stateFromSnapshot,
 } from './run-reducer';
 import type { RunState } from './run-types';
-import type { ClientCommand, RunSnapshotMessage, ServerMessage } from '../protocol/types';
-import { HARD_CLIENT_MAX_OUTPUT_BYTES } from '../protocol/constants';
+import type {
+  ClientCommand,
+  RunSnapshotMessage,
+  ServerMessage,
+  StartCommand,
+} from '../protocol/types';
+import { HARD_CLIENT_MAX_OUTPUT_BYTES, LIMITS } from '../protocol/constants';
 import { isRunId, utf8ByteLength } from '../protocol/validation';
 
 const RUN_ID_STORAGE_KEY = 'synapse.run_id';
@@ -75,8 +80,10 @@ export function createRunController(dependencies: RunControllerDependencies) {
   let notice = $state<RunNotice | null>(null);
   let activeGeneration = $state<number | null>(null);
   let catchUpTarget = $state<number | null>(null);
+  let archived = $state<RunState[]>([]);
 
   let subscription: Subscription | null = null;
+  let pendingStart: StartCommand | null = null;
   let requireSnapshot = false;
   let catchUpTimer: unknown = null;
   const pendingCancels = new SvelteMap<string, number>();
@@ -150,6 +157,7 @@ export function createRunController(dependencies: RunControllerDependencies) {
   }
 
   function handleCommandSent(command: ClientCommand, generation: number): void {
+    if (command.type === 'run.start') pendingStart = command;
     if (command.type === 'run.cancel' && current?.runId === command.payload.run_id) {
       pendingCancels.set(command.request_id, generation);
     }
@@ -164,6 +172,8 @@ export function createRunController(dependencies: RunControllerDependencies) {
     requireSnapshot = false;
     syncState = 'idle';
     notice = null;
+    archived = [];
+    pendingStart = null;
     removeRunId(dependencies.storage);
     return true;
   }
@@ -173,7 +183,8 @@ export function createRunController(dependencies: RunControllerDependencies) {
       protocolFault();
       return;
     }
-    current = initialRunState(runId);
+    current = initialRunState(runId, pendingStart);
+    pendingStart = null;
     restoredRunId = runId;
     requireSnapshot = false;
     syncState = 'live';
@@ -326,6 +337,7 @@ export function createRunController(dependencies: RunControllerDependencies) {
   }
 
   function handleServerError(code: string, context: MessageContext): void {
+    if (context.correlation?.kind === 'start') pendingStart = null;
     if (context.correlation?.kind === 'cancel') {
       pendingCancels.delete(context.correlation.requestId);
     }
@@ -366,7 +378,20 @@ export function createRunController(dependencies: RunControllerDependencies) {
     const retainedCancelAcknowledgement =
       current?.runId === payload.run_id && current.cancelAcknowledged;
     const snapshot = stateFromSnapshot(payload);
-    current = retainedCancelAcknowledgement ? { ...snapshot, cancelAcknowledged: true } : snapshot;
+    const retainedTrace =
+      current?.runId === payload.run_id
+        ? {
+            start: current.start,
+            events: [],
+            eventBytes: 0,
+            traceIncomplete: true,
+          }
+        : {};
+    current = {
+      ...snapshot,
+      ...retainedTrace,
+      cancelAcknowledged: retainedCancelAcknowledgement || snapshot.cancelAcknowledged,
+    };
     restoredRunId = payload.run_id;
     persistRunId(dependencies.storage, payload.run_id);
     clearCatchUp();
@@ -490,13 +515,40 @@ export function createRunController(dependencies: RunControllerDependencies) {
   function canClear(): boolean {
     if (subscription || pendingCancels.size > 0) return false;
     return (
-      (current?.terminal !== null && current?.terminal !== undefined) || syncState === 'not_found'
+      (current?.terminal !== null && current?.terminal !== undefined) ||
+      archived.length > 0 ||
+      syncState === 'not_found'
+    );
+  }
+
+  function prepareNext(): boolean {
+    const settled = current;
+    if (!settled?.terminal || subscription || pendingCancels.size > 0) return false;
+    archived = [...archived, settled].slice(-LIMITS.sessionRuns);
+    current = null;
+    restoredRunId = null;
+    requireSnapshot = false;
+    syncState = 'idle';
+    notice = null;
+    removeRunId(dependencies.storage);
+    return true;
+  }
+
+  function canPrepareNext(): boolean {
+    return (
+      current?.terminal !== null &&
+      current?.terminal !== undefined &&
+      !subscription &&
+      pendingCancels.size === 0
     );
   }
 
   return {
     get current() {
       return current ? $state.snapshot(current) : null;
+    },
+    get runs() {
+      return current ? [...archived, current] : [...archived];
     },
     get restoredRunId() {
       return restoredRunId;
@@ -516,10 +568,14 @@ export function createRunController(dependencies: RunControllerDependencies) {
     get canClear() {
       return canClear();
     },
+    get canPrepareNext() {
+      return canPrepareNext();
+    },
     handleReady,
     handleGenerationEnd,
     handleMessage,
     handleCommandSent,
+    prepareNext,
     clear,
   };
 }

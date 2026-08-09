@@ -39,7 +39,8 @@ defmodule Synapse.Agent.Runner do
 
   State charges a logical turn immediately before its Provider operation, a Tool
   call immediately before ToolStarted, completed normalized Provider output after
-  terminal success, and each known Result before any later operation. The same
+  terminal success, and each known Result before any later operation. Tool events
+  copy exact admitted arguments and normalized model-visible Result content. The same
   effective monotonic deadline is passed to Provider and Tool contexts and checked
   before every operation and continuation. Retry accounting remains a separate
   State transition because retries do not create logical turns.
@@ -611,7 +612,8 @@ defmodule Synapse.Agent.Runner do
              operation_id: operation_id,
              call_id: call.call_id,
              name: call.name,
-             ordinal: ordinal
+             ordinal: ordinal,
+             arguments: call.arguments
            ) do
       case Executor.execute(call, tool_context) do
         %ToolResult{} = result ->
@@ -676,7 +678,8 @@ defmodule Synapse.Agent.Runner do
       name: call.name,
       ordinal: ordinal,
       status: result.status,
-      metadata: tool_event_metadata(call, result)
+      metadata: tool_event_metadata(call, result),
+      content: result.content
     )
   end
 

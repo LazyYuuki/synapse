@@ -12,6 +12,8 @@ defmodule Synapse.API.Policy do
     :budget,
     :max_incoming_message_bytes,
     :max_outgoing_message_bytes,
+    :max_input_tokens,
+    :fixed_input_tokens,
     :max_prompt_bytes,
     :max_request_id_bytes,
     :max_run_id_bytes,
@@ -35,6 +37,8 @@ defmodule Synapse.API.Policy do
   @maximums %{
     max_incoming_message_bytes: 2_097_152,
     max_outgoing_message_bytes: 3_276_800,
+    max_input_tokens: 272_000,
+    fixed_input_tokens: 272_000,
     max_prompt_bytes: 262_144,
     max_request_id_bytes: 128,
     max_run_id_bytes: 64,
@@ -61,6 +65,8 @@ defmodule Synapse.API.Policy do
           budget: Budget.t(),
           max_incoming_message_bytes: pos_integer(),
           max_outgoing_message_bytes: pos_integer(),
+          max_input_tokens: pos_integer(),
+          fixed_input_tokens: pos_integer(),
           max_prompt_bytes: pos_integer(),
           max_request_id_bytes: pos_integer(),
           max_run_id_bytes: pos_integer(),
@@ -90,6 +96,8 @@ defmodule Synapse.API.Policy do
         budget: config.budget,
         max_incoming_message_bytes: config.max_incoming_message_bytes,
         max_outgoing_message_bytes: config.max_outgoing_message_bytes,
+        max_input_tokens: config.max_input_tokens,
+        fixed_input_tokens: config.fixed_input_tokens,
         max_prompt_bytes: config.max_prompt_bytes,
         max_request_id_bytes: config.max_request_id_bytes,
         max_run_id_bytes: config.max_run_id_bytes,
@@ -129,6 +137,7 @@ defmodule Synapse.API.Policy do
       end) and escaped_start_fits?(policy) and
       policy.max_request_id_bytes <= policy.max_incoming_message_bytes and
       policy.max_run_id_bytes <= policy.max_incoming_message_bytes and
+      policy.fixed_input_tokens < policy.max_input_tokens and
       policy.budget.max_output_bytes <= policy.max_projection_text_bytes and
       escaped_snapshot_fits?(policy) and
       policy.max_pull_bytes == policy.max_outgoing_message_bytes
